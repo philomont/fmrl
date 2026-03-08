@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.fmrl` chunked binary file format (IHDR, DATA, AGE, META, IEND) with CRC-32 verified chunks
 - Encode pipeline: RGBA pixels → 4-color palette quantization → 32×32 tile partitioning → zlib/DEFLATE → `.fmrl`
 - Decode pipeline with two-pass AGE chunk range tracking for in-place byte mutation
-- Decay engine: pixels fade toward paper colour; edge erosion stochastically converts stroke-edge pixels to paper; each render reduces information rather than adding it
+- Decay engine: pixels fade toward paper color; edge erosion stochastically converts stroke-edge pixels to paper; each render reduces information rather than adding it
 - Deterministic per-tile xoshiro128++ PRNG seeded from `noise_seed` XOR tile coordinates
 - `render()` — applies decay to all tiles and writes the mutated AGE chunk back into the file buffer
 - `patch_age_chunk()` — reserializes AGE entries and recomputes CRC in-place
@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 16 integration tests covering encode/decode roundtrip, CRC validation, unknown-chunk tolerance, decay determinism, and AGE mutation correctness
 - Interactive drawing canvas web app (GitHub Pages): 1024×768 canvas at 1:1 CSS pixels, palette swatches, three brush sizes (radii 4/12/28), Age / Age 10× buttons, Save/Load `.fmrl`, touch support
 - Loading a `.fmrl` file applies one erosion step before display, representing elapsed time since last save
-- Passive aging toggle: applies age steps automatically while enabled, mimicking slow environmental degradation (UV bleaching, mineral dissolution); rate adjustable via − / + buttons through 120 / 60 / 30 / 15 / 10 / 5 / 2 seconds per step (default 10 s); toggle uses plain CSS active state (replaced `color-mix` which silently failed in some browsers)
+- Passive aging toggle: applies age steps automatically while enabled, mimicking slow environmental degradation (UV bleaching, mineral dissolution); rate adjustable via − / + buttons across six intervals — 50 ms, 100 ms, 200 ms, 500 ms, 1 s, 2 s per step (default 1 s); toggle uses plain CSS active state (replaced `color-mix` which silently failed in some browsers)
 - Compression size metric displayed after each age step (absolute byte count + delta from previous press)
 - Sans-serif font theme (system-ui stack)
 - `src/age.rs` — `age_step(indices, width, height)` encapsulates the aging algorithm in Rust; `age_step_indices` WASM export added
