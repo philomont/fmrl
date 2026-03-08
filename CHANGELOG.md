@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FmrlView` WASM surface (`decode_and_decay`, `get_mutated_bytes`, `view_count`, `last_view_ms`, `avg_fade_level`, `width`, `height`) gated behind the `wasm` feature
 - `now_ms()` helper — `SystemTime` on native, `js_sys::Date::now()` under WASM
 - 16 integration tests covering encode/decode roundtrip, CRC validation, unknown-chunk tolerance, decay determinism, and AGE mutation correctness
-- Interactive drawing canvas web app (GitHub Pages): 1024×1024 canvas at 1:1 CSS pixels (no scaling), palette swatches, three brush sizes (radii 4/12/28 scaled for the higher resolution), Age / Age 10× buttons, Save/Load `.fmrl`, touch support
-- Passive aging toggle: applies one age step every 10 seconds while enabled, mimicking slow environmental degradation (UV bleaching, mineral dissolution); same algorithm as the manual Age button, off by default; toggle uses plain CSS active state (replaced `color-mix` which silently failed in some browsers)
+- Interactive drawing canvas web app (GitHub Pages): 1024×768 canvas at 1:1 CSS pixels, palette swatches, three brush sizes (radii 4/12/28), Age / Age 10× buttons, Save/Load `.fmrl`, touch support
+- Loading a `.fmrl` file applies one erosion step before display, representing elapsed time since last save
+- Passive aging toggle: applies age steps automatically while enabled, mimicking slow environmental degradation (UV bleaching, mineral dissolution); rate adjustable via − / + buttons through 120 / 60 / 30 / 15 / 10 / 5 / 2 seconds per step (default 10 s); toggle uses plain CSS active state (replaced `color-mix` which silently failed in some browsers)
 - Compression size metric displayed after each age step (absolute byte count + delta from previous press)
 - Sans-serif font theme (system-ui stack)
 - `src/age.rs` — `age_step(indices, width, height)` encapsulates the aging algorithm in Rust; `age_step_indices` WASM export added
