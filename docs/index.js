@@ -1,9 +1,9 @@
 import init, { FmrlView, encode_rgba, decode_to_indices } from './pkg/fmrl.js';
 
-// ── Canvas dimensions (mutable — updated when loading a file) ──────────────
+// ── Canvas dimensions — set from window on init, updated when loading a file ─
 
-let W = 1024;
-let H = 768;
+let W = 0;
+let H = 0;
 
 // Default palette: ink, paper, crimson, white
 const PALETTE = [
@@ -13,9 +13,9 @@ const PALETTE = [
     [255, 255, 255],  // 3  white
 ];
 
-// ── Drawing state ──────────────────────────────────────────────────────────
+// ── Drawing state ───────────────────────────────────────────────────────────
 
-let indices   = new Uint8Array(W * H).fill(1); // all paper
+let indices   = null;
 let colorIdx  = 0;
 let brushSize = 4;
 let drawing   = false;
@@ -23,7 +23,7 @@ let lastX     = -1;
 let lastY     = -1;
 let lastSize  = 0;  // previous .fmrl byte count for Δ display
 
-// ── Rendering — canvas logical size set once; CSS scales the display ───────
+// ── Rendering ───────────────────────────────────────────────────────────────
 
 let canvas;
 
@@ -40,14 +40,7 @@ function render() {
     ctx.putImageData(imgData, 0, 0);
 }
 
-function setCanvasSize(w, h) {
-    W = w; H = h;
-    canvas.width  = W;
-    canvas.height = H;
-    indices = new Uint8Array(W * H).fill(1);
-}
-
-// ── Drawing ────────────────────────────────────────────────────────────────
+// ── Drawing ─────────────────────────────────────────────────────────────────
 
 function canvasCoords(e) {
     const r  = canvas.getBoundingClientRect();
@@ -77,49 +70,50 @@ function paintLine(x0, y0, x1, y1) {
     }
 }
 
-// ── Aging ──────────────────────────────────────────────────────────────────
+// ── Aging ───────────────────────────────────────────────────────────────────
 //
-// Two passes that both lengthen uniform runs → smaller compressed output:
+// _doAgeStep(src, full):
 //
-// 1. Morphological erosion: a non-paper pixel with ≥ 3 of its 8 neighbours
-//    being paper becomes paper.  Threshold 3 means face pixels (3 diagonal/
-//    orthogonal neighbours on one side) are eroded each step, guaranteeing
-//    convergence to all-paper for any finite mark.
+//   full=true  — morphological erosion + short-run elimination.
+//                Used by the manual Age button, Age 10×, and save.
+//                Maximum data removal per step; file size decreases
+//                monotonically.  Convergence to all-paper is guaranteed.
 //
-// 2. Short-run elimination: scan every row and every column.  Any run of
-//    non-paper pixels whose extent is ≤ RUN_THRESHOLD becomes paper.  This
-//    collapses thin isolated features and breaks no existing long runs — the
-//    surviving non-paper regions are always wider than the threshold, so zlib
-//    sees longer regular sequences and produces smaller output.
+//   full=false — morphological erosion only (no short-run elimination).
+//                Used by passive aging at high rates (50 ms–2 s) so each
+//                individual step is fine-grained and the animation reads as
+//                continuous decay rather than discrete jumps.
 //
-// Neither pass introduces new non-paper pixels; both can only convert to paper.
-// File size therefore decreases monotonically with each age step.
+// Both modes only convert non-paper pixels to paper — information is strictly
+// non-increasing and convergence to all-paper is guaranteed for both.
 
-const RUN_THRESHOLD = 2; // runs ≤ this many pixels wide are erased
+const RUN_THRESHOLD = 2; // runs ≤ this many pixels wide are erased (full mode)
 
-function ageStep() {
-    const next = indices.slice();
+function _doAgeStep(src, full = true) {
+    const next = src.slice();
     const w = W, h = H;
 
     // Pass 1: morphological erosion (≥3 paper 8-neighbours → paper).
-    // Threshold 3 ensures face pixels of solid blocks are eroded each step:
-    // every finite non-paper cluster has at least one pixel with 3 paper
-    // neighbours, so convergence to all-paper is guaranteed.
+    // Threshold 3 ensures face pixels of solid blocks are always eligible:
+    // every finite non-paper cluster has at least one such pixel, so
+    // convergence to all-paper is guaranteed.
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-            if (indices[y * w + x] === 1) continue;
+            if (src[y * w + x] === 1) continue;
             let paperCount = 0;
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
                     if (dx === 0 && dy === 0) continue;
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || nx >= w || ny < 0 || ny >= h ||
-                        indices[ny * w + nx] === 1) paperCount++;
+                        src[ny * w + nx] === 1) paperCount++;
                 }
             }
             if (paperCount >= 3) next[y * w + x] = 1;
         }
     }
+
+    if (!full) return next;
 
     // Pass 2a: short-run elimination — rows
     for (let y = 0; y < h; y++) {
@@ -151,15 +145,22 @@ function ageStep() {
         }
     }
 
-    indices = next;
+    return next;
 }
 
-// ── Compression metric ─────────────────────────────────────────────────────
+// Run n full age steps on the global canvas and re-render once.
+function applyAge(n = 1) {
+    for (let i = 0; i < n; i++) indices = _doAgeStep(indices, true);
+    render();
+    updateMetric();
+}
 
-function indicesToRgba() {
+// ── Compression metric ──────────────────────────────────────────────────────
+
+function indicesToRgba(src = indices) {
     const rgba = new Uint8Array(W * H * 4);
     for (let i = 0; i < W * H; i++) {
-        const [r, g, b] = PALETTE[indices[i]];
+        const [r, g, b] = PALETTE[src[i]];
         rgba[i * 4] = r; rgba[i * 4 + 1] = g;
         rgba[i * 4 + 2] = b; rgba[i * 4 + 3] = 255;
     }
@@ -180,18 +181,11 @@ function updateMetric() {
     lastSize = size;
 }
 
-// Run n age steps then re-render and update the metric once.
-function applyAge(n = 1) {
-    for (let i = 0; i < n; i++) ageStep();
-    render();
-    updateMetric();
-}
-
-// ── Passive aging ───────────────────────────────────────────────────────────
+// ── Passive aging ────────────────────────────────────────────────────────────
 //
-// Mimics slow environmental degradation — UV bleaching, mineral dissolution,
-// water evaporation on stone.  One age step fires at the current rate while
-// the toggle is on.  Uses the identical algorithm as the manual Age button.
+// Uses a light step (erosion only, no run elimination) so high-rate passive
+// aging feels fluid — each step removes a thin boundary layer rather than
+// collapsing entire short features all at once.
 
 // Available intervals in seconds, fastest → slowest.
 // − button moves toward slower (higher index), + toward faster (lower index).
@@ -215,7 +209,11 @@ function setPassiveAging(enabled) {
     passiveTimer = null;
     const btn = document.getElementById('btn-passive');
     if (enabled) {
-        passiveTimer = setInterval(() => applyAge(1), passiveIntervalMs());
+        passiveTimer = setInterval(() => {
+            indices = _doAgeStep(indices, false); // light step — erosion only
+            render();
+            updateMetric();
+        }, passiveIntervalMs());
         btn.classList.add('active');
         btn.textContent = 'Passive aging  ON';
     } else {
@@ -224,11 +222,17 @@ function setPassiveAging(enabled) {
     }
 }
 
-// ── Save / Load ────────────────────────────────────────────────────────────
+// ── Save / Load ─────────────────────────────────────────────────────────────
 
 function saveFmrl() {
     try {
-        const bytes = encode_rgba(indicesToRgba(), W, H);
+        // Bake 10 full erosion steps into the saved copy.  The file will be
+        // noticeably aged when next opened (which applies one more step).
+        // The live canvas is not affected.
+        let aged = indices.slice();
+        for (let i = 0; i < 10; i++) aged = _doAgeStep(aged, true);
+
+        const bytes = encode_rgba(indicesToRgba(aged), W, H);
         const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
         Object.assign(document.createElement('a'), { href: url, download: 'manuscript.fmrl' }).click();
         URL.revokeObjectURL(url);
@@ -238,32 +242,45 @@ function saveFmrl() {
 function loadFmrl(arrayBuffer) {
     try {
         const bytes = new Uint8Array(arrayBuffer);
-        // Peek at dimensions without applying any decay.
-        const peek = FmrlView.new(bytes);
+        const peek  = FmrlView.new(bytes);
         const fileW = peek.width(), fileH = peek.height();
         peek.free();
 
-        // Resize canvas to match loaded file.
         canvas.width = fileW; canvas.height = fileH;
         W = fileW; H = fileH;
 
         indices = new Uint8Array(decode_to_indices(bytes));
         // Opening a file ages it — one erosion step representing elapsed time.
-        ageStep();
+        indices = _doAgeStep(indices, true);
         render();
         lastSize = 0;
         updateMetric();
     } catch (e) { alert(`Failed to load .fmrl: ${e}`); }
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────
+// ── Tray ────────────────────────────────────────────────────────────────────
+
+function openTray() {
+    document.getElementById('tray').classList.add('open');
+    document.getElementById('tray-backdrop').classList.add('visible');
+}
+
+function closeTray() {
+    document.getElementById('tray').classList.remove('open');
+    document.getElementById('tray-backdrop').classList.remove('visible');
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
     await init();
 
     canvas = document.getElementById('canvas');
+    W = window.innerWidth;
+    H = window.innerHeight;
     canvas.width  = W;
     canvas.height = H;
+    indices = new Uint8Array(W * H).fill(1);
     document.getElementById('overlay').classList.add('hidden');
     render();
     updateMetric();
@@ -323,7 +340,7 @@ async function main() {
         if (passiveRateIdx < PASSIVE_RATES_S.length - 1) {
             passiveRateIdx++;
             updateRateDisplay();
-            if (passiveTimer) setPassiveAging(true); // restart at new rate
+            if (passiveTimer) setPassiveAging(true);
         }
     });
     document.getElementById('btn-rate-up').addEventListener('click', () => {
@@ -334,8 +351,10 @@ async function main() {
         }
     });
     updateRateDisplay();
-    document.getElementById('btn-clear').addEventListener('click',   () => { indices.fill(1); render(); lastSize = 0; updateMetric(); });
-    document.getElementById('btn-save').addEventListener('click',    saveFmrl);
+    document.getElementById('btn-clear').addEventListener('click', () => {
+        indices.fill(1); render(); lastSize = 0; updateMetric();
+    });
+    document.getElementById('btn-save').addEventListener('click', saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
         const file = e.target.files[0]; if (!file) return;
         const reader = new FileReader();
@@ -343,6 +362,11 @@ async function main() {
         reader.readAsArrayBuffer(file);
         e.target.value = '';
     });
+
+    // Tray
+    document.getElementById('tray-toggle').addEventListener('click', openTray);
+    document.getElementById('tray-close').addEventListener('click',  closeTray);
+    document.getElementById('tray-backdrop').addEventListener('click', closeTray);
 }
 
 main().catch(err => {

@@ -8,121 +8,104 @@
 </head>
 <body>
 
-  <header>
-    <h1>FMRL</h1>
-    <p class="tagline">Fragile Manuscript Record Layer</p>
-    <p class="subtitle">Draw. Age. Watch information leave.</p>
-  </header>
+  <canvas id="canvas"></canvas>
+  <div class="canvas-overlay" id="overlay"><span>Loading…</span></div>
 
-  <main>
+  <!-- ── Floating mini-toolbar (always visible) ──────────────────────────── -->
+  <div class="mini-toolbar" id="mini-toolbar">
+    <button id="tray-toggle" class="toolbar-btn" title="Tools &amp; settings">☰</button>
+    <div class="toolbar-sep"></div>
+    <button class="swatch active" data-idx="0" title="Ink"    style="--c:#000000"></button>
+    <button class="swatch"        data-idx="2" title="Crimson" style="--c:#b41e1e"></button>
+    <button class="swatch"        data-idx="3" title="White"   style="--c:#ffffff"></button>
+    <button class="swatch eraser" data-idx="1" title="Eraser (paper)"></button>
+    <div class="toolbar-sep"></div>
+    <button class="brush-btn active" data-size="4"  title="Fine">·</button>
+    <button class="brush-btn"        data-size="12" title="Medium">●</button>
+    <button class="brush-btn"        data-size="28" title="Thick">⬤</button>
+  </div>
 
-    <div class="studio">
+  <!-- ── Tray backdrop ───────────────────────────────────────────────────── -->
+  <div class="tray-backdrop" id="tray-backdrop"></div>
 
-      <div class="canvas-col">
-        <div class="canvas-frame">
-          <canvas id="canvas" width="1024" height="768"></canvas>
-          <div class="canvas-overlay" id="overlay"><span>Loading…</span></div>
-        </div>
-      </div>
-
-      <div class="tools-col">
-
-        <fieldset>
-          <legend>Color</legend>
-          <div class="palette-row">
-            <button class="swatch active" data-idx="0" title="Ink" style="--c:#000000"></button>
-            <button class="swatch"        data-idx="2" title="Crimson" style="--c:#b41e1e"></button>
-            <button class="swatch"        data-idx="3" title="White" style="--c:#ffffff"></button>
-            <button class="swatch eraser" data-idx="1" title="Eraser (paper)"></button>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Brush</legend>
-          <div class="brush-row">
-            <button class="brush-btn active" data-size="4"  title="Fine">·</button>
-            <button class="brush-btn"        data-size="12" title="Medium">●</button>
-            <button class="brush-btn"        data-size="28" title="Thick">⬤</button>
-          </div>
-        </fieldset>
-
-        <div class="action-group">
-          <div class="age-buttons">
-            <button id="btn-age"   class="btn-age">Age</button>
-            <button id="btn-age10" class="btn-age btn-age-10">Age 10×</button>
-          </div>
-          <div class="passive-row">
-            <button id="btn-passive" class="btn-passive">Passive aging  off</button>
-            <div class="rate-control">
-              <button id="btn-rate-down" class="rate-btn" title="Slower">−</button>
-              <span id="rate-display">1 s / step</span>
-              <button id="btn-rate-up"   class="rate-btn" title="Faster">+</button>
-            </div>
-          </div>
-          <p class="action-note">
-            Each press erodes one layer. Passive aging applies steps
-            automatically at the set rate — like UV bleaching or mineral
-            dissolution on stone. Loading a file also applies one step.
-          </p>
-          <p class="size-metric" id="size-metric"></p>
-        </div>
-
-        <div class="action-group secondary-actions">
-          <button id="btn-clear"  class="btn-secondary">Clear</button>
-          <button id="btn-save"   class="btn-secondary">Save .fmrl</button>
-          <label  class="btn-secondary btn-load">
-            Load .fmrl
-            <input type="file" id="file-input" accept=".fmrl" />
-          </label>
-        </div>
-
-      </div>
+  <!-- ── Popout tray ─────────────────────────────────────────────────────── -->
+  <aside class="tray" id="tray">
+    <div class="tray-header">
+      <span class="tray-title">FMRL</span>
+      <button id="tray-close" class="tray-close-btn" title="Close">×</button>
     </div>
 
-    <section class="about">
-      <div class="about-grid">
-        <div>
-          <h2>What is FMRL?</h2>
-          <p>
-            <strong>.fmrl</strong> (Fragile Manuscript Record Layer) is an image codec
-            where visual degradation is a core design feature. Files age with every
-            viewing — simulating the natural deterioration of physical media.
-          </p>
-          <ul>
-            <li><strong>Temporal decay</strong> — pixels fade toward the paper background based on days since last view</li>
-            <li><strong>Edge erosion</strong> — stroke edges wear away with each opening, reducing information rather than adding noise</li>
-            <li><strong>Deterministic</strong> — same file state always renders identically across all platforms</li>
-            <li><strong>Self-contained</strong> — all decay state lives inside the file's <code>AGE</code> chunk</li>
-          </ul>
+    <div class="tray-body">
+
+      <div class="action-group">
+        <div class="age-buttons">
+          <button id="btn-age"   class="btn-age">Age</button>
+          <button id="btn-age10" class="btn-age btn-age-10">Age 10×</button>
         </div>
-        <div>
-          <h2>How aging works</h2>
-          <p>
-            The Age button applies <strong>morphological erosion</strong>: any non-paper
-            pixel with three or more paper 8-neighbours becomes paper, eroding one layer
-            from every exposed surface per press. The eroded file compresses smaller
-            because larger uniform regions are more compressible — information is
-            genuinely lost, not obscured. <strong>Passive aging</strong> applies the
-            same process automatically every 10 seconds.
-          </p>
-          <p>
-            The <code>.fmrl</code> format stores images as a 4-color indexed palette
-            (ink, paper, crimson, white) in 32×32 tiles, each zlib-compressed.
-            The <code>AGE</code> chunk carries per-tile timestamps and erosion counters
-            that are rewritten with every render.
-          </p>
-          <div class="links">
-            <a href="https://github.com/philomont/fmrl" class="btn-link">Source on GitHub</a>
+        <div class="passive-row">
+          <button id="btn-passive" class="btn-passive">Passive aging  off</button>
+          <div class="rate-control">
+            <button id="btn-rate-down" class="rate-btn" title="Slower">−</button>
+            <span id="rate-display">1 s / step</span>
+            <button id="btn-rate-up"   class="rate-btn" title="Faster">+</button>
           </div>
         </div>
+        <p class="action-note">
+          Age erodes one full layer. Passive aging uses a lighter step (erosion
+          only) so high-rate aging feels fluid. Saving bakes in 10 erosion
+          steps — the image will be noticeably older when next opened, which
+          applies one more step.
+        </p>
+        <p class="size-metric" id="size-metric"></p>
       </div>
-    </section>
 
-  </main>
+      <div class="action-group secondary-actions">
+        <button id="btn-clear" class="btn-secondary">Clear</button>
+        <button id="btn-save"  class="btn-secondary">Save .fmrl</button>
+        <label  class="btn-secondary btn-load">
+          Load .fmrl
+          <input type="file" id="file-input" accept=".fmrl" />
+        </label>
+      </div>
 
-  <footer>
-    <p>Degradation is not a bug. &mdash; FMRL v0.1.0</p>
-  </footer>
+      <section class="about">
+        <h2>What is FMRL?</h2>
+        <p>
+          <strong>.fmrl</strong> (Fragile Manuscript Record Layer) is an image codec
+          where visual degradation is a core design feature. Files age with every
+          viewing — simulating the natural deterioration of physical media.
+        </p>
+        <ul>
+          <li><strong>Temporal decay</strong> — pixels fade toward the paper background based on days since last view</li>
+          <li><strong>Edge erosion</strong> — stroke edges wear away with each opening, reducing information rather than adding noise</li>
+          <li><strong>Deterministic</strong> — same file state always renders identically across all platforms</li>
+          <li><strong>Self-contained</strong> — all decay state lives inside the file's <code>AGE</code> chunk</li>
+        </ul>
+
+        <h2>How aging works</h2>
+        <p>
+          The Age button applies <strong>morphological erosion</strong>: any non-paper
+          pixel with three or more paper 8-neighbors becomes paper, eroding one layer
+          from every exposed surface per press. The eroded file compresses smaller
+          because larger uniform regions are more compressible — information is
+          genuinely lost, not obscured.
+        </p>
+        <p>
+          <strong>Passive aging</strong> uses erosion alone (no short-run
+          elimination) so individual steps are finer-grained and the animation reads
+          as continuous decay rather than discrete jumps. The <code>.fmrl</code>
+          format stores images as a 4-color indexed palette (ink, paper, crimson,
+          white) in 32×32 tiles, each zlib-compressed. The <code>AGE</code> chunk
+          carries per-tile timestamps and erosion counters that are rewritten with
+          every render.
+        </p>
+        <div class="links">
+          <a href="https://github.com/philomont/fmrl" class="btn-link">Source on GitHub</a>
+        </div>
+      </section>
+
+    </div>
+  </aside>
 
   <script type="module" src="index.js"></script>
 </body>
