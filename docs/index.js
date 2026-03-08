@@ -3,7 +3,7 @@ import init, { FmrlView, encode_rgba, decode_to_indices } from './pkg/fmrl.js';
 // ── Canvas dimensions (mutable — updated when loading a file) ──────────────
 
 let W = 1024;
-let H = 1024;
+let H = 768;
 
 // Default palette: ink, paper, crimson, white
 const PALETTE = [
@@ -190,20 +190,30 @@ function applyAge(n = 1) {
 // ── Passive aging ───────────────────────────────────────────────────────────
 //
 // Mimics slow environmental degradation — UV bleaching, mineral dissolution,
-// water evaporation on stone.  One age step fires every PASSIVE_INTERVAL_MS
-// while the toggle is on.  Uses the identical algorithm as the manual Age
-// button; the difference is only the rate.
+// water evaporation on stone.  One age step fires at the current rate while
+// the toggle is on.  Uses the identical algorithm as the manual Age button.
 
-const PASSIVE_INTERVAL_MS = 10_000; // one erosion pass every 10 seconds
+// Available intervals in seconds, slowest → fastest.
+const PASSIVE_RATES_S = [120, 60, 30, 15, 10, 5, 2];
+let passiveRateIdx = 4; // default: 10 s/step
 
 let passiveTimer = null;
+
+function passiveIntervalMs() {
+    return PASSIVE_RATES_S[passiveRateIdx] * 1000;
+}
+
+function updateRateDisplay() {
+    document.getElementById('rate-display').textContent =
+        PASSIVE_RATES_S[passiveRateIdx] + ' s / step';
+}
 
 function setPassiveAging(enabled) {
     clearInterval(passiveTimer);
     passiveTimer = null;
     const btn = document.getElementById('btn-passive');
     if (enabled) {
-        passiveTimer = setInterval(() => applyAge(1), PASSIVE_INTERVAL_MS);
+        passiveTimer = setInterval(() => applyAge(1), passiveIntervalMs());
         btn.classList.add('active');
         btn.textContent = 'Passive aging  ON';
     } else {
@@ -236,6 +246,8 @@ function loadFmrl(arrayBuffer) {
         W = fileW; H = fileH;
 
         indices = new Uint8Array(decode_to_indices(bytes));
+        // Opening a file ages it — one erosion step representing elapsed time.
+        ageStep();
         render();
         lastSize = 0;
         updateMetric();
@@ -305,6 +317,21 @@ async function main() {
     document.getElementById('btn-age').addEventListener('click',    () => applyAge(1));
     document.getElementById('btn-age10').addEventListener('click',   () => applyAge(10));
     document.getElementById('btn-passive').addEventListener('click', e => setPassiveAging(!e.currentTarget.classList.contains('active')));
+    document.getElementById('btn-rate-down').addEventListener('click', () => {
+        if (passiveRateIdx < PASSIVE_RATES_S.length - 1) {
+            passiveRateIdx++;
+            updateRateDisplay();
+            if (passiveTimer) setPassiveAging(true); // restart at new rate
+        }
+    });
+    document.getElementById('btn-rate-up').addEventListener('click', () => {
+        if (passiveRateIdx > 0) {
+            passiveRateIdx--;
+            updateRateDisplay();
+            if (passiveTimer) setPassiveAging(true);
+        }
+    });
+    updateRateDisplay();
     document.getElementById('btn-clear').addEventListener('click',   () => { indices.fill(1); render(); lastSize = 0; updateMetric(); });
     document.getElementById('btn-save').addEventListener('click',    saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {

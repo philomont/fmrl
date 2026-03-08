@@ -79,7 +79,7 @@ main {
 #canvas {
   display: block;
   width: min(1024px, calc(100vw - 3rem));
-  height: auto;
+  height: min(768px, calc((100vw - 3rem) * 0.75));
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   cursor: crosshair;
@@ -216,6 +216,43 @@ legend {
 }
 
 .btn-age:hover { background: var(--accent-hi); }
+
+/* Passive aging row: toggle + rate control side by side */
+.passive-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.passive-row .btn-passive { flex: 1 1 auto; }
+
+.rate-control {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
+#rate-display {
+  font-size: 0.75rem;
+  font-family: var(--mono);
+  color: var(--text-dim);
+  min-width: 5.5em;
+  text-align: center;
+}
+
+.rate-btn {
+  width: 1.6rem;
+  height: 1.6rem;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.1s, border-color 0.1s;
+}
+.rate-btn:hover { color: var(--bright); border-color: var(--text-dim); }
 
 /* Passive aging toggle — muted by default, clearly lit when active */
 .btn-passive {

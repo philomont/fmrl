@@ -20,7 +20,7 @@
 
       <div class="canvas-col">
         <div class="canvas-frame">
-          <canvas id="canvas" width="1024" height="1024"></canvas>
+          <canvas id="canvas" width="1024" height="768"></canvas>
           <div class="canvas-overlay" id="overlay"><span>Loading…</span></div>
         </div>
       </div>
@@ -51,11 +51,18 @@
             <button id="btn-age"   class="btn-age">Age</button>
             <button id="btn-age10" class="btn-age btn-age-10">Age 10×</button>
           </div>
-          <button id="btn-passive" class="btn-passive">Passive aging  off</button>
+          <div class="passive-row">
+            <button id="btn-passive" class="btn-passive">Passive aging  off</button>
+            <div class="rate-control">
+              <button id="btn-rate-down" class="rate-btn" title="Slower">−</button>
+              <span id="rate-display">10 s / step</span>
+              <button id="btn-rate-up"   class="rate-btn" title="Faster">+</button>
+            </div>
+          </div>
           <p class="action-note">
-            Each press erodes one layer. Passive aging applies one step every
-            10 seconds automatically — like UV bleaching or mineral dissolution
-            on stone.
+            Each press erodes one layer. Passive aging applies steps
+            automatically at the set rate — like UV bleaching or mineral
+            dissolution on stone. Loading a file also applies one step.
           </p>
           <p class="size-metric" id="size-metric"></p>
         </div>
