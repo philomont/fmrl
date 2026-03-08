@@ -2,6 +2,9 @@
 name = "fmrl"
 version = "0.1.0"
 edition = "2021"
+description = "Ephemeral image codec where files age with every viewing"
+repository = "https://github.com/philomont/fmrl"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

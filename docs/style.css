@@ -1,0 +1,321 @@
+:root {
+  --bg:           #12100d;
+  --surface:      #1c1912;
+  --border:       #2c2820;
+  --text:         #c6ba9a;
+  --text-dim:     #6e6650;
+  --accent:       #9a0f0f;
+  --accent-hi:    #c02020;
+  --bright:       #ece3c4;
+  --mono:         'Courier New', Courier, monospace;
+  --serif:        'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+/* ── Header ────────────────────────────────────── */
+header {
+  border-bottom: 1px solid var(--border);
+  padding: 3rem 1.5rem 2.5rem;
+  text-align: center;
+}
+
+.header-inner { max-width: 720px; margin: 0 auto; }
+
+h1 {
+  font-size: clamp(3rem, 8vw, 5rem);
+  letter-spacing: 0.3em;
+  color: var(--bright);
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.tagline {
+  margin-top: 0.3rem;
+  font-style: italic;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+  font-size: 0.9rem;
+}
+
+.subtitle {
+  margin-top: 0.9rem;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+/* ── Main ───────────────────────────────────────── */
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+}
+
+/* ── Demo section ───────────────────────────────── */
+.demo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  align-items: flex-start;
+}
+
+.canvas-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 0 0 auto;
+}
+
+.canvas-frame {
+  position: relative;
+  border: 1px solid var(--border);
+  box-shadow: 0 0 48px rgba(154, 15, 15, 0.1), 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+
+#canvas {
+  display: block;
+  max-width: min(512px, calc(100vw - 3rem));
+  height: auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.canvas-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 0.95rem;
+  transition: opacity 0.5s ease;
+}
+
+.canvas-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.canvas-hint {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  font-style: italic;
+  text-align: center;
+  max-width: 300px;
+}
+
+/* ── Side panel ─────────────────────────────────── */
+.panel {
+  flex: 1 1 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.stats {
+  display: flex;
+  gap: 1.5rem;
+  padding: 1.1rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.stat { min-width: 0; }
+
+.stat-label {
+  display: block;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 0.2rem;
+}
+
+.stat-value {
+  display: block;
+  font-size: 1.5rem;
+  color: var(--bright);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel-note {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+/* ── Controls ───────────────────────────────────── */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  padding: 0.55rem 1.2rem;
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+.btn input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  width: 100%;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--bright);
+}
+.btn-primary:hover { background: var(--accent-hi); }
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover {
+  border-color: var(--text-dim);
+  color: var(--bright);
+}
+
+/* ── About section ──────────────────────────────── */
+.about {
+  border-top: 1px solid var(--border);
+  padding-top: 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5rem;
+}
+
+@media (max-width: 640px) {
+  .about-grid { grid-template-columns: 1fr; }
+  .demo { flex-direction: column; align-items: center; }
+}
+
+h2 {
+  font-size: 1.2rem;
+  font-weight: normal;
+  font-style: italic;
+  color: var(--bright);
+  margin-bottom: 0.75rem;
+  letter-spacing: 0.02em;
+}
+
+p { margin-bottom: 0.9rem; color: var(--text); }
+p:last-child { margin-bottom: 0; }
+
+.mt { margin-top: 0.9rem; }
+
+ul {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 0;
+}
+
+ul li {
+  padding: 0.25rem 0 0.25rem 1.1rem;
+  position: relative;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+ul li::before {
+  content: '·';
+  position: absolute;
+  left: 0;
+  color: var(--accent-hi);
+}
+
+/* ── Chunk table ────────────────────────────────── */
+.chunk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin: 0.75rem 0;
+}
+
+.chunk-table td {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.chunk-table td:first-child {
+  white-space: nowrap;
+  background: var(--surface);
+  color: var(--accent-hi);
+}
+
+.chunk-table td:last-child {
+  color: var(--text);
+}
+
+/* ── Code / links ───────────────────────────────── */
+code {
+  font-family: var(--mono);
+  font-size: 0.82em;
+  color: var(--accent-hi);
+  background: var(--surface);
+  padding: 0.1em 0.35em;
+  border: 1px solid var(--border);
+}
+
+.links { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+
+.btn-link {
+  display: inline-block;
+  padding: 0.5rem 1.1rem;
+  border: 1px solid var(--accent);
+  color: var(--accent-hi);
+  text-decoration: none;
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn-link:hover {
+  background: var(--accent);
+  color: var(--bright);
+}
+
+/* ── Footer ─────────────────────────────────────── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 1.5rem;
+  text-align: center;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  font-style: italic;
+}

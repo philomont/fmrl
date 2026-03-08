@@ -1,0 +1,15 @@
+{
+  "name": "fmrl",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "fmrl_bg.wasm",
+    "fmrl.js",
+    "fmrl.d.ts"
+  ],
+  "main": "fmrl.js",
+  "types": "fmrl.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

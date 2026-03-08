@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FMRL — Fragile Manuscript Record Layer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <h1>FMRL</h1>
+      <p class="tagline">Fragile Manuscript Record Layer</p>
+      <p class="subtitle">An ephemeral image codec where files age with every viewing.</p>
+    </div>
+  </header>
+
+  <main>
+
+    <section class="demo">
+      <div class="canvas-wrap">
+        <div class="canvas-frame">
+          <canvas id="canvas" width="512" height="512"></canvas>
+          <div class="canvas-overlay" id="overlay">
+            <span id="overlay-text">Initialising…</span>
+          </div>
+        </div>
+        <p class="canvas-hint">Click the image to view it — each view ages the file permanently.</p>
+      </div>
+
+      <div class="panel">
+        <div class="stats">
+          <div class="stat">
+            <span class="stat-label">Views</span>
+            <span class="stat-value" id="stat-views">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Age</span>
+            <span class="stat-value" id="stat-age">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Fade</span>
+            <span class="stat-value" id="stat-fade">—</span>
+          </div>
+        </div>
+
+        <p class="panel-note">
+          Decay state lives inside the <code>.fmrl</code> file itself.
+          Each render mutates the <code>AGE</code> chunk and recomputes its CRC.
+          Your browser persists the aged file in <code>localStorage</code>.
+        </p>
+
+        <div class="controls">
+          <label class="btn btn-primary">
+            Open .fmrl file
+            <input type="file" id="file-input" accept=".fmrl" />
+          </label>
+          <button id="btn-reset" class="btn btn-secondary">Reset demo</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="about">
+      <div class="about-grid">
+        <div>
+          <h2>What is FMRL?</h2>
+          <p>
+            <strong>.fmrl</strong> (Fragile Manuscript Record Layer) is an image codec
+            where visual degradation is a core design feature. Images decay over time
+            and with repeated access — simulating the natural aging of physical media.
+            This is intentional art/archival design, not a bug.
+          </p>
+          <ul>
+            <li><strong>Temporal decay</strong> — images fade based on days since last view</li>
+            <li><strong>Usage-based wear</strong> — edge erosion accumulates with each opening</li>
+            <li><strong>Deterministic</strong> — same file state always renders identically on all platforms</li>
+            <li><strong>Self-contained</strong> — all decay state lives inside the file</li>
+          </ul>
+        </div>
+
+        <div>
+          <h2>File Format</h2>
+          <p>
+            <code>.fmrl</code> uses a PNG-style chunked binary format. Chunks are
+            CRC-32 verified; unknown chunks are silently skipped for forward compatibility.
+          </p>
+          <table class="chunk-table">
+            <tr><td><code>IHDR</code></td><td>Width, height, decay policy</td></tr>
+            <tr><td><code>DATA</code></td><td>4-color palette + zlib-compressed tiles</td></tr>
+            <tr><td><code>AGE </code></td><td>Per-tile: last_view, fade_level, noise_seed, edge_damage</td></tr>
+            <tr><td><code>META</code></td><td>Optional zlib-compressed JSON metadata</td></tr>
+            <tr><td><code>IEND</code></td><td>Terminator</td></tr>
+          </table>
+          <p class="mt">
+            The <code>AGE</code> chunk is mutated in-place after every render:
+            <code>last_view</code> and <code>fade_level</code> are updated and
+            the chunk CRC is recomputed.
+          </p>
+        </div>
+      </div>
+
+      <div class="links">
+        <a href="https://github.com/philomont/fmrl" class="btn-link">Source on GitHub</a>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>Degradation is not a bug. &mdash; FMRL v0.1.0</p>
+  </footer>
+
+  <script type="module" src="index.js"></script>
+</body>
+</html>
