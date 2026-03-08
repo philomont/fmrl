@@ -51,9 +51,11 @@
             <button id="btn-age"   class="btn-age">Age</button>
             <button id="btn-age10" class="btn-age btn-age-10">Age 10×</button>
           </div>
+          <button id="btn-passive" class="btn-passive">Passive aging: off</button>
           <p class="action-note">
-            Each press erodes fine details — thin strokes vanish first.
-            Aging reduces compressed file size by expanding uniform regions.
+            Each press erodes one layer. Passive aging applies one step every
+            10 seconds automatically — like UV bleaching or mineral dissolution
+            on stone.
           </p>
           <p class="size-metric" id="size-metric"></p>
         </div>
@@ -89,10 +91,12 @@
         <div>
           <h2>How aging works</h2>
           <p>
-            The Age button applies <strong>morphological erosion</strong>: any non-paper pixel
-            with five or more paper neighbours becomes paper. One press thins every stroke
-            by roughly one pixel. The eroded file compresses smaller because larger uniform
-            regions are more compressible — information is genuinely lost, not obscured.
+            The Age button applies <strong>morphological erosion</strong>: any non-paper
+            pixel with three or more paper 8-neighbours becomes paper, eroding one layer
+            from every exposed surface per press. The eroded file compresses smaller
+            because larger uniform regions are more compressible — information is
+            genuinely lost, not obscured. <strong>Passive aging</strong> applies the
+            same process automatically every 10 seconds.
           </p>
           <p>
             The <code>.fmrl</code> format stores images as a 4-colour indexed palette

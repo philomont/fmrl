@@ -210,6 +210,37 @@ legend {
 
 .btn-age:hover { background: var(--accent-hi); }
 
+/* Passive aging toggle — muted by default, glows when active */
+.btn-passive {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  font-family: var(--sans);
+  font-size: 0.82rem;
+  cursor: pointer;
+  text-align: left;
+  letter-spacing: 0.03em;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+.btn-passive::before {
+  content: '○  ';
+  font-size: 0.7rem;
+}
+.btn-passive:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+.btn-passive.active {
+  border-color: var(--accent);
+  color: var(--accent-hi);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.btn-passive.active::before {
+  content: '●  ';
+}
+
 .action-note {
   font-size: 0.78rem;
   color: var(--text-dim);

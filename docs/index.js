@@ -2,8 +2,8 @@ import init, { FmrlView, encode_rgba, decode_to_indices } from './pkg/fmrl.js';
 
 // ── Canvas dimensions (mutable — updated when loading a file) ──────────────
 
-let W = 128;
-let H = 128;
+let W = 256;
+let H = 256;
 
 // Default palette: ink, paper, crimson, white
 const PALETTE = [
@@ -187,6 +187,31 @@ function applyAge(n = 1) {
     updateMetric();
 }
 
+// ── Passive aging ───────────────────────────────────────────────────────────
+//
+// Mimics slow environmental degradation — UV bleaching, mineral dissolution,
+// water evaporation on stone.  One age step fires every PASSIVE_INTERVAL_MS
+// while the toggle is on.  Uses the identical algorithm as the manual Age
+// button; the difference is only the rate.
+
+const PASSIVE_INTERVAL_MS = 10_000; // one erosion pass every 10 seconds
+
+let passiveTimer = null;
+
+function setPassiveAging(enabled) {
+    clearInterval(passiveTimer);
+    passiveTimer = null;
+    const btn = document.getElementById('btn-passive');
+    if (enabled) {
+        passiveTimer = setInterval(() => applyAge(1), PASSIVE_INTERVAL_MS);
+        btn.classList.add('active');
+        btn.textContent = 'Passive aging: on';
+    } else {
+        btn.classList.remove('active');
+        btn.textContent = 'Passive aging: off';
+    }
+}
+
 // ── Save / Load ────────────────────────────────────────────────────────────
 
 function saveFmrl() {
@@ -279,6 +304,7 @@ async function main() {
 
     document.getElementById('btn-age').addEventListener('click',    () => applyAge(1));
     document.getElementById('btn-age10').addEventListener('click',   () => applyAge(10));
+    document.getElementById('btn-passive').addEventListener('click', e => setPassiveAging(!e.currentTarget.classList.contains('active')));
     document.getElementById('btn-clear').addEventListener('click',   () => { indices.fill(1); render(); lastSize = 0; updateMetric(); });
     document.getElementById('btn-save').addEventListener('click',    saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
