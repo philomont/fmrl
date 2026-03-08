@@ -31,6 +31,15 @@ export class FmrlView {
 }
 
 /**
+ * Apply one aging step to flat palette indices and return the result.
+ *
+ * `data` must be `width * height` bytes of palette indices (0–3; 1 = paper).
+ * Returns a new array of the same length with aged indices.
+ * See `age::age_step` for the full algorithm description.
+ */
+export function age_step_indices(data: Uint8Array, width: number, height: number): Uint8Array;
+
+/**
  * Create a fresh demo .fmrl file with a manuscript-like pattern.
  * The initial last_view is set 20 days in the past so decay is visible immediately.
  */
@@ -53,6 +62,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_fmrlview_free: (a: number, b: number) => void;
+    readonly age_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
     readonly create_demo_fmrl: () => [number, number, number, number];
     readonly decode_to_indices: (a: number, b: number) => [number, number, number, number];
     readonly encode_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
@@ -65,9 +75,9 @@ export interface InitOutput {
     readonly fmrlview_view_count: (a: number) => number;
     readonly fmrlview_width: (a: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
-    readonly __externref_table_dealloc: (a: number) => void;
-    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
+    readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

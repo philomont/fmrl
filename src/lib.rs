@@ -1,3 +1,4 @@
+pub mod age;
 pub mod decode;
 pub mod decay;
 pub mod encode;
@@ -8,6 +9,7 @@ pub mod prng;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
+pub use age::age_step;
 pub use decode::{DecodedFmrl, TileData, decode, patch_age_chunk};
 pub use encode::{FmrlImage, encode};
 pub use error::FmrlError;

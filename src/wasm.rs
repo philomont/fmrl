@@ -2,6 +2,7 @@
 
 use wasm_bindgen::prelude::*;
 
+use crate::age::age_step;
 use crate::decode::{DecodedFmrl, decode};
 use crate::encode::{FmrlImage, encode};
 use crate::format::{Palette, TILE_SIZE};
@@ -102,6 +103,16 @@ pub fn decode_to_indices(data: &[u8]) -> Result<Vec<u8>, JsValue> {
     }
 
     Ok(indices)
+}
+
+/// Apply one aging step to flat palette indices and return the result.
+///
+/// `data` must be `width * height` bytes of palette indices (0–3; 1 = paper).
+/// Returns a new array of the same length with aged indices.
+/// See `age::age_step` for the full algorithm description.
+#[wasm_bindgen]
+pub fn age_step_indices(data: &[u8], width: u16, height: u16) -> Vec<u8> {
+    age_step(data, width as usize, height as usize)
 }
 
 /// Create a fresh demo .fmrl file with a manuscript-like pattern.

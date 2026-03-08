@@ -96,6 +96,26 @@ export class FmrlView {
 if (Symbol.dispose) FmrlView.prototype[Symbol.dispose] = FmrlView.prototype.free;
 
 /**
+ * Apply one aging step to flat palette indices and return the result.
+ *
+ * `data` must be `width * height` bytes of palette indices (0–3; 1 = paper).
+ * Returns a new array of the same length with aged indices.
+ * See `age::age_step` for the full algorithm description.
+ * @param {Uint8Array} data
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8Array}
+ */
+export function age_step_indices(data, width, height) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.age_step_indices(ptr0, len0, width, height);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
  * Create a fresh demo .fmrl file with a manuscript-like pattern.
  * The initial last_view is set 20 days in the past so decay is visible immediately.
  * @returns {Uint8Array}

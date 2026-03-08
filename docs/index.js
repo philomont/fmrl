@@ -81,9 +81,10 @@ function paintLine(x0, y0, x1, y1) {
 //
 // Two passes that both lengthen uniform runs → smaller compressed output:
 //
-// 1. Edge erosion (majority vote): a non-paper pixel with ≥ 5 of its 8
-//    neighbours being paper becomes paper.  Strokes thin from the outside in,
-//    enlarging contiguous paper regions.
+// 1. Morphological erosion: a non-paper pixel with ≥ 3 of its 8 neighbours
+//    being paper becomes paper.  Threshold 3 means face pixels (3 diagonal/
+//    orthogonal neighbours on one side) are eroded each step, guaranteeing
+//    convergence to all-paper for any finite mark.
 //
 // 2. Short-run elimination: scan every row and every column.  Any run of
 //    non-paper pixels whose extent is ≤ RUN_THRESHOLD becomes paper.  This
@@ -100,7 +101,10 @@ function ageStep() {
     const next = indices.slice();
     const w = W, h = H;
 
-    // Pass 1: morphological erosion
+    // Pass 1: morphological erosion (≥3 paper 8-neighbours → paper).
+    // Threshold 3 ensures face pixels of solid blocks are eroded each step:
+    // every finite non-paper cluster has at least one pixel with 3 paper
+    // neighbours, so convergence to all-paper is guaranteed.
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
             if (indices[y * w + x] === 1) continue;
@@ -113,7 +117,7 @@ function ageStep() {
                         indices[ny * w + nx] === 1) paperCount++;
                 }
             }
-            if (paperCount >= 5) next[y * w + x] = 1;
+            if (paperCount >= 3) next[y * w + x] = 1;
         }
     }
 
