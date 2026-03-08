@@ -21,9 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FmrlView` WASM surface (`decode_and_decay`, `get_mutated_bytes`, `view_count`, `last_view_ms`, `avg_fade_level`, `width`, `height`) gated behind the `wasm` feature
 - `now_ms()` helper — `SystemTime` on native, `js_sys::Date::now()` under WASM
 - 16 integration tests covering encode/decode roundtrip, CRC validation, unknown-chunk tolerance, decay determinism, and AGE mutation correctness
-- Interactive drawing canvas web app (GitHub Pages): 256×256 canvas, palette swatches, three brush sizes, Age / Age 10× buttons, Save/Load `.fmrl`, touch support
-- Two-component aging in the web demo: edge erosion (majority-vote morphological) plus content-derived deterministic interior thinning (~7.8% per pass) seeded from neighbourhood XOR — no `Math.random()`, no fixed seed
+- Interactive drawing canvas web app (GitHub Pages): 128×128 canvas at 6× CSS scale (768px), palette swatches, three brush sizes, Age / Age 10× buttons, Save/Load `.fmrl`, touch support
 - Compression size metric displayed after each age step (absolute byte count + delta from previous press)
 - Sans-serif font theme (system-ui stack)
+- `src/age.rs` — `age_step(indices, width, height)` encapsulates the aging algorithm in Rust; `age_step_indices` WASM export added
+- Aging algorithm guaranteed to converge to all-paper: morphological erosion with ≥3 paper 8-neighbour threshold (face pixels of any solid block always have exactly 3, so no finite fixed point other than all-paper exists); followed by short-run elimination (rows then columns, runs ≤2 pixels wide become paper) to collapse thin isolated features and lengthen uniform runs for better zlib compression
+- 5 integration tests in `tests/aging_decay.rs` verifying: convergence to all-paper, file size reduction over time, checkerboard decay, single-pixel erasure in one step, and the monotonic non-paper-count invariant
 
 [0.1.0]: https://github.com/philomont/fmrl/releases/tag/v0.1.0
