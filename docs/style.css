@@ -237,7 +237,7 @@ legend {
   font-size: 0.75rem;
   font-family: var(--mono);
   color: var(--text-dim);
-  min-width: 5.5em;
+  min-width: 7em;
   text-align: center;
 }
 

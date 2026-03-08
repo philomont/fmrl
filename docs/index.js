@@ -193,9 +193,10 @@ function applyAge(n = 1) {
 // water evaporation on stone.  One age step fires at the current rate while
 // the toggle is on.  Uses the identical algorithm as the manual Age button.
 
-// Available intervals in seconds, slowest → fastest.
-const PASSIVE_RATES_S = [120, 60, 30, 15, 10, 5, 2];
-let passiveRateIdx = 4; // default: 10 s/step
+// Available intervals in seconds, fastest → slowest.
+// − button moves toward slower (higher index), + toward faster (lower index).
+const PASSIVE_RATES_S = [0.05, 0.1, 0.2, 0.5, 1, 2];
+let passiveRateIdx = 4; // default: 1 s/step
 
 let passiveTimer = null;
 
@@ -204,8 +205,9 @@ function passiveIntervalMs() {
 }
 
 function updateRateDisplay() {
-    document.getElementById('rate-display').textContent =
-        PASSIVE_RATES_S[passiveRateIdx] + ' s / step';
+    const s = PASSIVE_RATES_S[passiveRateIdx];
+    const text = s < 1 ? (s * 1000) + ' ms / step' : s + ' s / step';
+    document.getElementById('rate-display').textContent = text;
 }
 
 function setPassiveAging(enabled) {
