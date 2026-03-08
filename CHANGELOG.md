@@ -20,4 +20,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `now_ms()` helper — `SystemTime` on native, `js_sys::Date::now()` under WASM
 - 16 integration tests covering encode/decode roundtrip, CRC validation, unknown-chunk tolerance, decay determinism, and AGE mutation correctness
 
-[0.1.0]: https://github.com/your-org/fmrl/releases/tag/v0.1.0
+[0.1.0]: https://github.com/philomont/fmrl/releases/tag/v0.1.0
