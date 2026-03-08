@@ -9,57 +9,62 @@
 <body>
 
   <header>
-    <div class="header-inner">
-      <h1>FMRL</h1>
-      <p class="tagline">Fragile Manuscript Record Layer</p>
-      <p class="subtitle">An ephemeral image codec where files age with every viewing.</p>
-    </div>
+    <h1>FMRL</h1>
+    <p class="tagline">Fragile Manuscript Record Layer</p>
+    <p class="subtitle">Draw. Age. Watch information leave.</p>
   </header>
 
   <main>
 
-    <section class="demo">
-      <div class="canvas-wrap">
+    <div class="studio">
+
+      <div class="canvas-col">
         <div class="canvas-frame">
           <canvas id="canvas" width="512" height="512"></canvas>
-          <div class="canvas-overlay" id="overlay">
-            <span id="overlay-text">Initialising…</span>
-          </div>
+          <div class="canvas-overlay" id="overlay"><span>Loading…</span></div>
         </div>
-        <p class="canvas-hint">Click the image to view it — each view ages the file permanently.</p>
       </div>
 
-      <div class="panel">
-        <div class="stats">
-          <div class="stat">
-            <span class="stat-label">Views</span>
-            <span class="stat-value" id="stat-views">—</span>
+      <div class="tools-col">
+
+        <fieldset>
+          <legend>Colour</legend>
+          <div class="palette-row">
+            <button class="swatch active" data-idx="0" title="Ink" style="--c:#000000"></button>
+            <button class="swatch"        data-idx="2" title="Crimson" style="--c:#b41e1e"></button>
+            <button class="swatch"        data-idx="3" title="White" style="--c:#ffffff"></button>
+            <button class="swatch eraser" data-idx="1" title="Eraser (paper)"></button>
           </div>
-          <div class="stat">
-            <span class="stat-label">Age</span>
-            <span class="stat-value" id="stat-age">—</span>
+        </fieldset>
+
+        <fieldset>
+          <legend>Brush</legend>
+          <div class="brush-row">
+            <button class="brush-btn active" data-size="1" title="Fine">·</button>
+            <button class="brush-btn"        data-size="3" title="Medium">●</button>
+            <button class="brush-btn"        data-size="6" title="Thick">⬤</button>
           </div>
-          <div class="stat">
-            <span class="stat-label">Fade</span>
-            <span class="stat-value" id="stat-fade">—</span>
-          </div>
+        </fieldset>
+
+        <div class="action-group">
+          <button id="btn-age" class="btn-age">Age</button>
+          <p class="action-note">
+            Each press erodes fine details — thin strokes vanish first.
+            Aging reduces compressed file size by expanding uniform regions.
+          </p>
         </div>
 
-        <p class="panel-note">
-          Decay state lives inside the <code>.fmrl</code> file itself.
-          Each render mutates the <code>AGE</code> chunk and recomputes its CRC.
-          Your browser persists the aged file in <code>localStorage</code>.
-        </p>
-
-        <div class="controls">
-          <label class="btn btn-primary">
-            Open .fmrl file
+        <div class="action-group secondary-actions">
+          <button id="btn-clear"  class="btn-secondary">Clear</button>
+          <button id="btn-save"   class="btn-secondary">Save .fmrl</button>
+          <label  class="btn-secondary btn-load">
+            Load .fmrl
             <input type="file" id="file-input" accept=".fmrl" />
           </label>
-          <button id="btn-reset" class="btn btn-secondary">Reset demo</button>
         </div>
+
       </div>
-    </section>
+    </div>
 
     <section class="about">
       <div class="about-grid">
@@ -67,41 +72,34 @@
           <h2>What is FMRL?</h2>
           <p>
             <strong>.fmrl</strong> (Fragile Manuscript Record Layer) is an image codec
-            where visual degradation is a core design feature. Images decay over time
-            and with repeated access — simulating the natural aging of physical media.
-            This is intentional art/archival design, not a bug.
+            where visual degradation is a core design feature. Files age with every
+            viewing — simulating the natural deterioration of physical media.
           </p>
           <ul>
-            <li><strong>Temporal decay</strong> — images fade based on days since last view</li>
-            <li><strong>Usage-based wear</strong> — edge erosion accumulates with each opening</li>
-            <li><strong>Deterministic</strong> — same file state always renders identically on all platforms</li>
-            <li><strong>Self-contained</strong> — all decay state lives inside the file</li>
+            <li><strong>Temporal decay</strong> — pixels fade toward the paper background based on days since last view</li>
+            <li><strong>Edge erosion</strong> — stroke edges wear away with each opening, reducing information rather than adding noise</li>
+            <li><strong>Deterministic</strong> — same file state always renders identically across all platforms</li>
+            <li><strong>Self-contained</strong> — all decay state lives inside the file's <code>AGE</code> chunk</li>
           </ul>
         </div>
-
         <div>
-          <h2>File Format</h2>
+          <h2>How aging works</h2>
           <p>
-            <code>.fmrl</code> uses a PNG-style chunked binary format. Chunks are
-            CRC-32 verified; unknown chunks are silently skipped for forward compatibility.
+            The Age button applies <strong>morphological erosion</strong>: any non-paper pixel
+            with five or more paper neighbours becomes paper. One press thins every stroke
+            by roughly one pixel. The eroded file compresses smaller because larger uniform
+            regions are more compressible — information is genuinely lost, not obscured.
           </p>
-          <table class="chunk-table">
-            <tr><td><code>IHDR</code></td><td>Width, height, decay policy</td></tr>
-            <tr><td><code>DATA</code></td><td>4-color palette + zlib-compressed tiles</td></tr>
-            <tr><td><code>AGE </code></td><td>Per-tile: last_view, fade_level, noise_seed, edge_damage</td></tr>
-            <tr><td><code>META</code></td><td>Optional zlib-compressed JSON metadata</td></tr>
-            <tr><td><code>IEND</code></td><td>Terminator</td></tr>
-          </table>
-          <p class="mt">
-            The <code>AGE</code> chunk is mutated in-place after every render:
-            <code>last_view</code> and <code>fade_level</code> are updated and
-            the chunk CRC is recomputed.
+          <p>
+            The <code>.fmrl</code> format stores images as a 4-colour indexed palette
+            (ink, paper, crimson, white) in 32×32 tiles, each zlib-compressed.
+            The <code>AGE</code> chunk carries per-tile timestamps and erosion counters
+            that are rewritten with every render.
           </p>
+          <div class="links">
+            <a href="https://github.com/philomont/fmrl" class="btn-link">Source on GitHub</a>
+          </div>
         </div>
-      </div>
-
-      <div class="links">
-        <a href="https://github.com/philomont/fmrl" class="btn-link">Source on GitHub</a>
       </div>
     </section>
 

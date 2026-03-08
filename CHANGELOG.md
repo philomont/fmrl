@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Decay model**: replaced desaturation-toward-grayscale + salt-and-pepper noise with fade-toward-paper-color + stochastic edge erosion. Rendered output now always reduces information rather than adding it — noise increases entropy and was incorrect.
+- **Web demo**: replaced passive image viewer with an interactive drawing canvas (128×128, 4× display scale). Users draw with ink/crimson/white/eraser in three brush sizes.
+
+### Added
+- `encode_rgba(rgba, width, height)` WASM export — encodes raw RGBA pixels to a `.fmrl` file
+- `decode_to_indices(data)` WASM export — decodes a `.fmrl` file to flat palette indices for editor loading (no decay applied, no AGE mutation)
+- **Age button**: one-press morphological 8-neighbour erosion — pixels with ≥5 paper neighbours convert to paper. Thin strokes erode first; each press demonstrably reduces compressed file size.
+- Save `.fmrl` / Load `.fmrl` buttons for round-tripping files
+- Touch support on the drawing canvas
+
 ## [0.1.0] - 2026-03-08
 
 ### Added

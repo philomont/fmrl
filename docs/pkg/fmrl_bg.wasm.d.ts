@@ -3,6 +3,8 @@
 export const memory: WebAssembly.Memory;
 export const __wbg_fmrlview_free: (a: number, b: number) => void;
 export const create_demo_fmrl: () => [number, number, number, number];
+export const decode_to_indices: (a: number, b: number) => [number, number, number, number];
+export const encode_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
 export const fmrlview_avg_fade_level: (a: number) => number;
 export const fmrlview_decode_and_decay: (a: number) => [number, number, number, number];
 export const fmrlview_get_mutated_bytes: (a: number) => [number, number];

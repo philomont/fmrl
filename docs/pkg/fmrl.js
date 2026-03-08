@@ -110,6 +110,44 @@ export function create_demo_fmrl() {
     return v1;
 }
 
+/**
+ * Decode a .fmrl file and return flat palette indices (0–3), row-major, width×height bytes.
+ * Does not apply decay and does not mutate the file — intended for loading into an editor.
+ * @param {Uint8Array} data
+ * @returns {Uint8Array}
+ */
+export function decode_to_indices(data) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.decode_to_indices(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Encode raw RGBA pixels into a new .fmrl file using the default palette.
+ * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8Array}
+ */
+export function encode_rgba(rgba, width, height) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.encode_rgba(ptr0, len0, width, height);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,

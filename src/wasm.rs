@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::decode::{DecodedFmrl, decode};
 use crate::encode::{FmrlImage, encode};
-use crate::format::Palette;
+use crate::format::{Palette, TILE_SIZE};
 use crate::render;
 
 #[wasm_bindgen]
@@ -61,6 +61,47 @@ impl FmrlView {
     pub fn height(&self) -> u16 {
         self.decoded.ihdr.height
     }
+}
+
+/// Encode raw RGBA pixels into a new .fmrl file using the default palette.
+/// `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+#[wasm_bindgen]
+pub fn encode_rgba(rgba: &[u8], width: u16, height: u16) -> Result<Vec<u8>, JsValue> {
+    let now = js_sys::Date::now() as u64;
+    let image = FmrlImage {
+        width,
+        height,
+        palette: Palette::default(),
+        pixels: rgba.to_vec(),
+        decay_policy: 0,
+        meta: None,
+    };
+    encode(&image, now).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Decode a .fmrl file and return flat palette indices (0–3), row-major, width×height bytes.
+/// Does not apply decay and does not mutate the file — intended for loading into an editor.
+#[wasm_bindgen]
+pub fn decode_to_indices(data: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let decoded = decode(data).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let w = decoded.ihdr.width as usize;
+    let h = decoded.ihdr.height as usize;
+    let mut indices = vec![1u8; w * h]; // default to paper
+
+    for tile in &decoded.tiles {
+        let tx = tile.tx as usize;
+        let ty = tile.ty as usize;
+        for py in 0..TILE_SIZE {
+            let dst_y = ty * TILE_SIZE + py;
+            let dst_x = tx * TILE_SIZE;
+            let src_start = py * TILE_SIZE;
+            let dst_start = dst_y * w + dst_x;
+            indices[dst_start..dst_start + TILE_SIZE]
+                .copy_from_slice(&tile.indices[src_start..src_start + TILE_SIZE]);
+        }
+    }
+
+    Ok(indices)
 }
 
 /// Create a fresh demo .fmrl file with a manuscript-like pattern.

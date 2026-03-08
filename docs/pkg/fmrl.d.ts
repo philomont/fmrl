@@ -36,12 +36,26 @@ export class FmrlView {
  */
 export function create_demo_fmrl(): Uint8Array;
 
+/**
+ * Decode a .fmrl file and return flat palette indices (0–3), row-major, width×height bytes.
+ * Does not apply decay and does not mutate the file — intended for loading into an editor.
+ */
+export function decode_to_indices(data: Uint8Array): Uint8Array;
+
+/**
+ * Encode raw RGBA pixels into a new .fmrl file using the default palette.
+ * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+ */
+export function encode_rgba(rgba: Uint8Array, width: number, height: number): Uint8Array;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_fmrlview_free: (a: number, b: number) => void;
     readonly create_demo_fmrl: () => [number, number, number, number];
+    readonly decode_to_indices: (a: number, b: number) => [number, number, number, number];
+    readonly encode_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly fmrlview_avg_fade_level: (a: number) => number;
     readonly fmrlview_decode_and_decay: (a: number) => [number, number, number, number];
     readonly fmrlview_get_mutated_bytes: (a: number) => [number, number];

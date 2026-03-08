@@ -1,7 +1,13 @@
 {
   "name": "fmrl",
   "type": "module",
+  "description": "Ephemeral image codec where files age with every viewing",
   "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/philomont/fmrl"
+  },
   "files": [
     "fmrl_bg.wasm",
     "fmrl.js",

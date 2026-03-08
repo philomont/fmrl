@@ -4,17 +4,12 @@ use crate::prng::TilePrng;
 
 const THIRTY_DAYS_MS: f32 = 30.0 * 24.0 * 3600.0 * 1000.0;
 
-/// Desaturation weight per palette slot.
-/// 0=ink→1.0, 1=paper→0.3, 2=accent→0.7, 3=white→0.2
-const DESAT_WEIGHT: [f32; 4] = [1.0, 0.3, 0.7, 0.2];
-
 /// Derive the effective fade factor for a tile given the global decay_policy.
 /// policy=0: ink-heavy tiles get 1.5×, background tiles get 0.5×.
 fn effective_fade(base_fade: f32, tile: &TileData, decay_policy: u8) -> f32 {
     if decay_policy != 0 {
         return base_fade;
     }
-    // Count ink pixels (palette index 0)
     let ink_count = tile.indices.iter().filter(|&&i| i == 0).count();
     let total = tile.indices.len();
     let ink_ratio = ink_count as f32 / total as f32;
@@ -41,10 +36,6 @@ pub fn render_tile(tile: &TileData, age: &AgeEntry, palette: &Palette, now_ms: u
     } else {
         0.0
     };
-
-    // decay_policy is not passed here; caller integrates it via effective_fade externally
-    // For this function we use base_fade directly (caller should pre-compute effective fade)
-    // We expose a separate render_tile_with_policy function for the orchestration layer.
     render_tile_inner(tile, age, palette, base_fade)
 }
 
@@ -69,39 +60,33 @@ fn render_tile_inner(tile: &TileData, age: &AgeEntry, palette: &Palette, fade: f
     let mut output = vec![255u8; pixel_count * 4];
     let mut prng = TilePrng::from_tile(age);
 
+    // Paper color is the target state — all non-paper pixels fade toward it.
+    let [paper_r, paper_g, paper_b] = palette.0[1];
+
     for i in 0..pixel_count {
         let idx = tile.indices[i] as usize;
         let [r, g, b] = palette.0[idx.min(3)];
-        let weight = DESAT_WEIGHT[idx.min(3)];
 
-        // 1. Desaturate: lerp toward grayscale
-        let luma = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) as u8;
-        let desat_strength = fade * weight;
-        let mut pr = lerp_u8(r, luma, desat_strength);
-        let mut pg = lerp_u8(g, luma, desat_strength);
-        let mut pb = lerp_u8(b, luma, desat_strength);
+        // 1. Fade toward paper color. Paper pixels (idx==1) are already at rest.
+        let (mut pr, mut pg, mut pb) = if idx == 1 {
+            (r, g, b)
+        } else {
+            (
+                lerp_u8(r, paper_r, fade),
+                lerp_u8(g, paper_g, fade),
+                lerp_u8(b, paper_b, fade),
+            )
+        };
 
-        // 2. Noise injection: with probability fade*0.15, flip to adjacent palette color
-        if prng.next_f32() < fade * 0.15 {
-            // adjacent palette color: cycle index
-            let alt_idx = (idx + 1) % 4;
-            let [ar, ag, ab] = palette.0[alt_idx];
-            pr = lerp_u8(pr, ar, 0.5);
-            pg = lerp_u8(pg, ag, 0.5);
-            pb = lerp_u8(pb, ab, 0.5);
-        }
-
-        // 3. Edge damage: check if pixel is at a stroke edge
-        let is_edge = is_stroke_edge(tile, i);
-        if is_edge {
+        // 2. Edge erosion: edge pixels stochastically convert to paper.
+        //    Probability gates on edge_damage accumulated over views.
+        //    Result is always paper — this reduces information, not adds it.
+        if idx != 1 && is_stroke_edge(tile, i) {
             let edge_prob = (age.edge_damage as f32 / 100.0) * fade;
             if prng.next_f32() < edge_prob {
-                // salt-and-pepper: randomly go white or black
-                if prng.next_f32() < 0.5 {
-                    pr = 255; pg = 255; pb = 255;
-                } else {
-                    pr = 0; pg = 0; pb = 0;
-                }
+                pr = paper_r;
+                pg = paper_g;
+                pb = paper_b;
             }
         }
 
@@ -139,11 +124,8 @@ fn is_stroke_edge(tile: &TileData, pixel_idx: usize) -> bool {
 /// Update age state for a tile after viewing. Never modifies noise_seed.
 pub fn mutate_age(age: &mut AgeEntry, now_ms: u64) {
     age.last_view = now_ms;
-    // Increment fade_level at a slow rate (saturating)
     age.fade_level = age.fade_level.saturating_add(1);
-    // Increment edge_damage at a slow rate (saturating at 100)
     if age.edge_damage < 100 {
         age.edge_damage = age.edge_damage.saturating_add(1);
     }
-    // noise_seed is intentionally NOT modified
 }
