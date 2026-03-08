@@ -52,7 +52,7 @@ h1 {
 
 /* ── Studio layout ──────────────────────────────── */
 main {
-  max-width: 960px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 2rem 1.5rem 3rem;
   display: flex;
@@ -78,7 +78,7 @@ main {
 
 #canvas {
   display: block;
-  max-width: min(512px, calc(100vw - 3rem));
+  width: min(768px, calc(100vw - 3rem));
   height: auto;
   image-rendering: pixelated;
   image-rendering: crisp-edges;

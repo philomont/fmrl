@@ -2,8 +2,8 @@ import init, { FmrlView, encode_rgba, decode_to_indices } from './pkg/fmrl.js';
 
 // ── Canvas dimensions (mutable — updated when loading a file) ──────────────
 
-let W = 256;
-let H = 256;
+let W = 128;
+let H = 128;
 
 // Default palette: ink, paper, crimson, white
 const PALETTE = [
@@ -79,51 +79,71 @@ function paintLine(x0, y0, x1, y1) {
 
 // ── Aging ──────────────────────────────────────────────────────────────────
 //
-// Two-component degradation, both information-reducing:
+// Two passes that both lengthen uniform runs → smaller compressed output:
 //
-// 1. Edge erosion (majority vote): a non-paper pixel with ≥ 5 paper
-//    neighbours becomes paper.  Strokes thin from the outside in.
+// 1. Edge erosion (majority vote): a non-paper pixel with ≥ 5 of its 8
+//    neighbours being paper becomes paper.  Strokes thin from the outside in,
+//    enlarging contiguous paper regions.
 //
-// 2. Uniform interior thinning (~8% per pass): for pixels that survive
-//    edge erosion, a deterministic hash of (x, y, neighbourhood_xor)
-//    selects which ones disappear.  The neighbourhood XOR encodes the
-//    current image state, so the speckle pattern shifts naturally as the
-//    image ages — no Math.random(), no fixed seed, just the existing pixels.
+// 2. Short-run elimination: scan every row and every column.  Any run of
+//    non-paper pixels whose extent is ≤ RUN_THRESHOLD becomes paper.  This
+//    collapses thin isolated features and breaks no existing long runs — the
+//    surviving non-paper regions are always wider than the threshold, so zlib
+//    sees longer regular sequences and produces smaller output.
 //
-// Both paths always convert to paper, never to other colours.
+// Neither pass introduces new non-paper pixels; both can only convert to paper.
+// File size therefore decreases monotonically with each age step.
+
+const RUN_THRESHOLD = 2; // runs ≤ this many pixels wide are erased
 
 function ageStep() {
     const next = indices.slice();
     const w = W, h = H;
 
+    // Pass 1: morphological erosion
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-            if (indices[y * w + x] === 1) continue; // paper is immune
-
+            if (indices[y * w + x] === 1) continue;
             let paperCount = 0;
-            let nbXor = 0;
-
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
                     if (dx === 0 && dy === 0) continue;
                     const nx = x + dx, ny = y + dy;
-                    const v = (nx < 0 || nx >= w || ny < 0 || ny >= h)
-                        ? 1 : indices[ny * w + nx];
-                    if (v === 1) paperCount++;
-                    nbXor ^= v;
+                    if (nx < 0 || nx >= w || ny < 0 || ny >= h ||
+                        indices[ny * w + nx] === 1) paperCount++;
                 }
             }
+            if (paperCount >= 5) next[y * w + x] = 1;
+        }
+    }
 
-            // 1. Edge erosion
-            if (paperCount >= 5) { next[y * w + x] = 1; continue; }
+    // Pass 2a: short-run elimination — rows
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; ) {
+            if (next[y * w + x] !== 1) {
+                let e = x + 1;
+                while (e < w && next[y * w + e] !== 1) e++;
+                if (e - x <= RUN_THRESHOLD)
+                    for (let rx = x; rx < e; rx++) next[y * w + rx] = 1;
+                x = e;
+            } else {
+                x++;
+            }
+        }
+    }
 
-            // 2. Interior thinning — content-derived deterministic hash
-            //    Mix position with neighbourhood state; no random variable.
-            let h32 = (Math.imul(x + 1, 0x9e3779b9) ^ Math.imul(y + 1, 0x6c62272e)
-                       ^ Math.imul(nbXor + 1, 0x27d4eb2f)) >>> 0;
-            h32 = Math.imul(h32 ^ (h32 >>> 16), 0x45d9f3b) >>> 0;
-            h32 = (h32 ^ (h32 >>> 15)) >>> 0;
-            if ((h32 & 0xFF) < 20) next[y * w + x] = 1; // ≈ 7.8 %
+    // Pass 2b: short-run elimination — columns
+    for (let x = 0; x < w; x++) {
+        for (let y = 0; y < h; ) {
+            if (next[y * w + x] !== 1) {
+                let e = y + 1;
+                while (e < h && next[e * w + x] !== 1) e++;
+                if (e - y <= RUN_THRESHOLD)
+                    for (let ry = y; ry < e; ry++) next[ry * w + x] = 1;
+                y = e;
+            } else {
+                y++;
+            }
         }
     }
 
