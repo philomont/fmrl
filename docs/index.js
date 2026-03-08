@@ -2,8 +2,8 @@ import init, { FmrlView, encode_rgba, decode_to_indices } from './pkg/fmrl.js';
 
 // ── Canvas dimensions (mutable — updated when loading a file) ──────────────
 
-let W = 256;
-let H = 256;
+let W = 1024;
+let H = 1024;
 
 // Default palette: ink, paper, crimson, white
 const PALETTE = [
@@ -17,7 +17,7 @@ const PALETTE = [
 
 let indices   = new Uint8Array(W * H).fill(1); // all paper
 let colorIdx  = 0;
-let brushSize = 2;
+let brushSize = 4;
 let drawing   = false;
 let lastX     = -1;
 let lastY     = -1;
@@ -205,10 +205,10 @@ function setPassiveAging(enabled) {
     if (enabled) {
         passiveTimer = setInterval(() => applyAge(1), PASSIVE_INTERVAL_MS);
         btn.classList.add('active');
-        btn.textContent = 'Passive aging: on';
+        btn.textContent = 'Passive aging  ON';
     } else {
         btn.classList.remove('active');
-        btn.textContent = 'Passive aging: off';
+        btn.textContent = 'Passive aging  off';
     }
 }
 
