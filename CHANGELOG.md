@@ -5,22 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-03-09
 
 ### Added
 
-- Whiteboard layout: canvas fills the full viewport; all controls moved to a slide-in tray (right on desktop, bottom-slide on mobile ≤540 px wide)
-- Floating mini-toolbar stays visible on the canvas at all times: color swatches, brush sizes, text tool, and a ☰ button to open the tray; tray closes via × or backdrop tap
-- Two-tier aging: `_doAgeStep(src, full)` replaces `ageStep()` — `full=true` (morphological erosion + short-run elimination, used by Age / Age 10×) for maximum data removal per step; `full=false` (erosion only, used by passive aging) for fine-grained fluid degradation at sub-second rates
-- Save bakes 10 full erosion steps into the encoded copy without touching the live canvas; the next open applies one more step, making temporal decay clearly visible across save/load cycles
-- Text tool (`T` button): click canvas to place a baseline cursor, type to render text in the current palette color using National Park (variable woff2); Enter commits the line and advances the cursor, Escape cancels; text ages identically to drawn strokes
-- Font size picker in tray: S / M / L / XL (16 / 32 / 52 / 80 canvas pixels)
-- National Park variable-weight woff2 font family (ExtraLight → ExtraBold) added to `docs/fonts/`; loaded via `@font-face` with an async JS preload on init
-- Canvas resolution capped at 1024 px on the larger dimension (aspect ratio preserved, both dimensions rounded to multiples of 32); CSS still scales to fill the viewport — intentionally pixelated at high display resolutions for faster encoding and rendering
+- Whiteboard layout: canvas fills the full viewport (sized to the next multiple of 32, larger dimension capped at 1024 px for performance); CSS scales to fill the screen — intentionally pixelated at high display resolutions
+- Persistent action bar pinned to the bottom of the screen: Age | Age ×10 | Auto (passive) toggle + rate control | byte-size metric | Clear | Save | Load | ℹ about; scrolls horizontally on narrow screens
+- Left drawing toolbar (always visible): color swatches, brush sizes, T button; sits above the action bar on mobile (≤540 px)
+- Two-tier aging: `_doAgeStep(src, full)` — `full=true` (erosion + short-run elimination) for Age / Age ×10 and save; `full=false` (erosion only) for auto aging so high-rate steps feel fluid
+- Save bakes 10 full erosion steps into the encoded copy; opening applies one more — images are visibly older each time the file changes hands
+- Text tool (`T` button): click canvas to place a baseline cursor, type to render text in the current palette color using National Park; Enter advances to the next line, Escape cancels without committing; font size tracks the active brush (fine → 16 px, medium → 40 px, thick → 80 px)
+- National Park variable-weight woff2 font family (`ExtraLight` → `ExtraBold`) added to `docs/fonts/`; declared via `@font-face` with an async preload on init
+- About/info tray (ℹ button): slides in from the right on desktop, up from the bottom on mobile
+- Auto aging rate display shortened to compact form (`500ms`, `1s`) to fit the action bar
+
+### Changed
+
+- Brush radii halved — r = 2 / 6 / 14 (was 4 / 12 / 28) so stroke widths are proportional to corresponding font sizes
+- Rate display format condensed: `500ms` / `1s` instead of `500 ms / step` / `1 s / step`
 
 ### Fixed
 
-- Canvas dimensions are now rounded to the nearest multiple of 32 before being passed to `encode_rgba`; `window.innerWidth/innerHeight` are almost never divisible by 32, causing a "malformed chunk: dimensions must be multiples of 32" WASM panic that prevented all canvas interaction
+- Canvas dimensions rounded to nearest multiple of 32 before `encode_rgba`; `window.innerWidth/innerHeight` are almost never divisible by 32, causing a WASM panic that blocked all interaction
+- Switching away from the text tool no longer leaves a cursor `|` artifact burned into the canvas; `setTextMode(false)` now always stops the blink timer and restores `textBaseIndices` before clearing state
+- Auto aging no longer freezes `textBaseIndices`; the snapshot is aged in sync with `indices` on each passive step, preventing the blink-restore from overwriting aged content while typing
 
 ## [0.1.0] - 2026-03-08
 
