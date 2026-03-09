@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Whiteboard layout: canvas fills the full viewport (sized to the next multiple of 32 in each dimension); all controls moved to a slide-in tray (right on desktop, bottom-slide on mobile ≤540 px wide)
+- Floating mini-toolbar stays visible on the canvas at all times: color swatches, brush sizes, and a ☰ button to open the tray; tray closes via × or backdrop tap
+- Two-tier aging: `_doAgeStep(src, full)` replaces `ageStep()` — `full=true` (morphological erosion + short-run elimination, used by Age / Age 10×) for maximum data removal per step; `full=false` (erosion only, used by passive aging) for fine-grained fluid degradation at sub-second rates
+- Save bakes 10 full erosion steps into the encoded copy without touching the live canvas; the next open applies one more step, making temporal decay clearly visible across save/load cycles
+
+### Fixed
+
+- Canvas dimensions are now rounded up to the nearest multiple of 32 before being passed to `encode_rgba`; `window.innerWidth/innerHeight` are almost never divisible by 32, causing a "malformed chunk: dimensions must be multiples of 32" WASM panic that prevented all canvas interaction
+
 ## [0.1.0] - 2026-03-08
 
 ### Added
