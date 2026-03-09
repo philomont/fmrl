@@ -11,65 +11,56 @@
   <canvas id="canvas"></canvas>
   <div class="canvas-overlay" id="overlay"><span>Loading…</span></div>
 
-  <!-- ── Floating mini-toolbar (always visible) ──────────────────────────── -->
+  <!-- ── Floating drawing toolbar (left strip) ───────────────────────────── -->
   <div class="mini-toolbar" id="mini-toolbar">
-    <button id="tray-toggle" class="toolbar-btn" title="Tools &amp; settings">☰</button>
-    <div class="toolbar-sep"></div>
     <button class="swatch active" data-idx="0" title="Ink"    style="--c:#000000"></button>
     <button class="swatch"        data-idx="2" title="Crimson" style="--c:#b41e1e"></button>
     <button class="swatch"        data-idx="3" title="White"   style="--c:#ffffff"></button>
     <button class="swatch eraser" data-idx="1" title="Eraser (paper)"></button>
     <div class="toolbar-sep"></div>
-    <button class="brush-btn active" data-size="4"  title="Fine">·</button>
-    <button class="brush-btn"        data-size="12" title="Medium">●</button>
-    <button class="brush-btn"        data-size="28" title="Thick">⬤</button>
+    <button class="brush-btn active" data-size="2"  title="Fine">·</button>
+    <button class="brush-btn"        data-size="6"  title="Medium">●</button>
+    <button class="brush-btn"        data-size="14" title="Thick">⬤</button>
     <div class="toolbar-sep"></div>
-    <button id="tool-text" class="brush-btn" title="Text — size follows brush selection">T</button>
+    <button id="tool-text" class="brush-btn" title="Text — size follows brush">T</button>
+  </div>
+
+  <!-- ── Action bar (bottom strip) ───────────────────────────────────────── -->
+  <div class="action-bar">
+    <div class="bar-group">
+      <button id="btn-age"   class="bar-btn bar-accent">Age</button>
+      <button id="btn-age10" class="bar-btn bar-accent">Age ×10</button>
+    </div>
+    <div class="bar-sep"></div>
+    <div class="bar-group">
+      <button id="btn-passive"   class="bar-btn">Auto&nbsp;&nbsp;off</button>
+      <button id="btn-rate-down" class="bar-icon-btn" title="Slower">−</button>
+      <span   id="rate-display"  class="bar-mono">1s</span>
+      <button id="btn-rate-up"   class="bar-icon-btn" title="Faster">+</button>
+    </div>
+    <div class="bar-sep"></div>
+    <span id="size-metric" class="bar-metric"></span>
+    <div class="bar-spacer"></div>
+    <button id="btn-clear" class="bar-btn">Clear</button>
+    <button id="btn-save"  class="bar-btn">Save</button>
+    <label  class="bar-btn btn-load">
+      Load
+      <input type="file" id="file-input" accept=".fmrl" />
+    </label>
+    <div class="bar-sep"></div>
+    <button id="tray-toggle" class="bar-icon-btn" title="About FMRL">ℹ</button>
   </div>
 
   <!-- ── Tray backdrop ───────────────────────────────────────────────────── -->
   <div class="tray-backdrop" id="tray-backdrop"></div>
 
-  <!-- ── Popout tray ─────────────────────────────────────────────────────── -->
+  <!-- ── About tray (info text only) ────────────────────────────────────── -->
   <aside class="tray" id="tray">
     <div class="tray-header">
       <span class="tray-title">FMRL</span>
       <button id="tray-close" class="tray-close-btn" title="Close">×</button>
     </div>
-
     <div class="tray-body">
-
-      <div class="action-group">
-        <div class="age-buttons">
-          <button id="btn-age"   class="btn-age">Age</button>
-          <button id="btn-age10" class="btn-age btn-age-10">Age 10×</button>
-        </div>
-        <div class="passive-row">
-          <button id="btn-passive" class="btn-passive">Passive aging  off</button>
-          <div class="rate-control">
-            <button id="btn-rate-down" class="rate-btn" title="Slower">−</button>
-            <span id="rate-display">1 s / step</span>
-            <button id="btn-rate-up"   class="rate-btn" title="Faster">+</button>
-          </div>
-        </div>
-        <p class="action-note">
-          Age erodes one full layer. Passive aging uses a lighter step (erosion
-          only) so high-rate aging feels fluid. Saving bakes in 10 erosion
-          steps — the image will be noticeably older when next opened, which
-          applies one more step.
-        </p>
-        <p class="size-metric" id="size-metric"></p>
-      </div>
-
-      <div class="action-group secondary-actions">
-        <button id="btn-clear" class="btn-secondary">Clear</button>
-        <button id="btn-save"  class="btn-secondary">Save .fmrl</button>
-        <label  class="btn-secondary btn-load">
-          Load .fmrl
-          <input type="file" id="file-input" accept=".fmrl" />
-        </label>
-      </div>
-
       <section class="about">
         <h2>What is FMRL?</h2>
         <p>
@@ -93,19 +84,21 @@
           genuinely lost, not obscured.
         </p>
         <p>
-          <strong>Passive aging</strong> uses erosion alone (no short-run
-          elimination) so individual steps are finer-grained and the animation reads
-          as continuous decay rather than discrete jumps. The <code>.fmrl</code>
-          format stores images as a 4-color indexed palette (ink, paper, crimson,
-          white) in 32×32 tiles, each zlib-compressed. The <code>AGE</code> chunk
-          carries per-tile timestamps and erosion counters that are rewritten with
-          every render.
+          <strong>Auto aging</strong> uses a lighter erosion step (no short-run
+          elimination) so high-rate aging feels fluid rather than abrupt. The
+          <code>.fmrl</code> format stores images as a 4-color indexed palette
+          (ink, paper, crimson, white) in 32×32 tiles, each zlib-compressed. The
+          <code>AGE</code> chunk carries per-tile timestamps and erosion counters
+          rewritten with every render.
+        </p>
+        <p>
+          Saving bakes in 10 erosion steps. Opening applies one more — images are
+          noticeably older each time the file changes hands.
         </p>
         <div class="links">
           <a href="https://github.com/philomont/fmrl" class="btn-link">Source on GitHub</a>
         </div>
       </section>
-
     </div>
   </aside>
 

@@ -1,34 +1,32 @@
 import init, { FmrlView, encode_rgba, decode_to_indices } from './pkg/fmrl.js';
 
 // ── Canvas dimensions ───────────────────────────────────────────────────────
-// Set from window on init (capped so the larger dimension ≤ 1024), updated
-// on file load. Both dimensions are rounded to the nearest multiple of 32
-// (the codec tile boundary). CSS scales the canvas to fill the viewport.
 
 let W = 0;
 let H = 0;
 
 function computeCanvasDims(srcW, srcH) {
-    const MAX = 1024;
+    const MAX   = 1024;
     const scale = Math.min(1, MAX / Math.max(srcW, srcH));
-    const w = Math.min(Math.ceil(srcW * scale / 32) * 32, MAX);
-    const h = Math.min(Math.ceil(srcH * scale / 32) * 32, MAX);
-    return [w, h];
+    return [
+        Math.min(Math.ceil(srcW * scale / 32) * 32, MAX),
+        Math.min(Math.ceil(srcH * scale / 32) * 32, MAX),
+    ];
 }
 
 // Default palette: ink, paper, crimson, white
 const PALETTE = [
-    [  0,   0,   0],  // 0  ink
-    [230, 220, 195],  // 1  paper (background / eraser)
-    [180,  30,  30],  // 2  crimson
-    [255, 255, 255],  // 3  white
+    [  0,   0,   0],
+    [230, 220, 195],
+    [180,  30,  30],
+    [255, 255, 255],
 ];
 
 // ── Drawing state ───────────────────────────────────────────────────────────
 
 let indices   = null;
 let colorIdx  = 0;
-let brushSize = 4;
+let brushSize = 2;   // matches first brush-btn data-size
 let drawing   = false;
 let lastX     = -1;
 let lastY     = -1;
@@ -84,16 +82,17 @@ function paintLine(x0, y0, x1, y1) {
 // ── Aging ───────────────────────────────────────────────────────────────────
 //
 // _doAgeStep(src, full):
-//   full=true  — morphological erosion + short-run elimination.
-//   full=false — morphological erosion only (for fluid passive aging).
+//   full=true  — morphological erosion + short-run elimination (manual Age,
+//                Age ×10, save): maximum data removal per step.
+//   full=false — morphological erosion only (auto aging): finer-grained steps
+//                so high-rate passive aging feels fluid.
 
-const RUN_THRESHOLD = 1; // only single isolated pixels are eliminated (finer decay steps)
+const RUN_THRESHOLD = 2;
 
 function _doAgeStep(src, full = true) {
     const next = src.slice();
     const w = W, h = H;
 
-    // Pass 1: morphological erosion (≥3 paper 8-neighbours → paper).
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
             if (src[y * w + x] === 1) continue;
@@ -112,7 +111,6 @@ function _doAgeStep(src, full = true) {
 
     if (!full) return next;
 
-    // Pass 2a: short-run elimination — rows
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; ) {
             if (next[y * w + x] !== 1) {
@@ -125,7 +123,6 @@ function _doAgeStep(src, full = true) {
         }
     }
 
-    // Pass 2b: short-run elimination — columns
     for (let x = 0; x < w; x++) {
         for (let y = 0; y < h; ) {
             if (next[y * w + x] !== 1) {
@@ -160,19 +157,18 @@ function indicesToRgba(src = indices) {
 }
 
 function updateMetric() {
-    const fmrl = encode_rgba(indicesToRgba(), W, H);
-    const size = fmrl.length;
+    const size = encode_rgba(indicesToRgba(), W, H).length;
     const el   = document.getElementById('size-metric');
-    let text = `${size.toLocaleString()} bytes`;
+    let text = `${size.toLocaleString()} B`;
     if (lastSize > 0) {
         const diff = size - lastSize;
-        if (diff !== 0) text += `  ${diff < 0 ? '↓' : '↑'} ${Math.abs(diff).toLocaleString()}`;
+        if (diff !== 0) text += `  ${diff < 0 ? '↓' : '↑'}${Math.abs(diff).toLocaleString()}`;
     }
     el.textContent = text;
     lastSize = size;
 }
 
-// ── Passive aging ────────────────────────────────────────────────────────────
+// ── Auto (passive) aging ─────────────────────────────────────────────────────
 
 const PASSIVE_RATES_S = [0.05, 0.1, 0.2, 0.5, 1, 2];
 let passiveRateIdx = 4;
@@ -183,7 +179,7 @@ function passiveIntervalMs() { return PASSIVE_RATES_S[passiveRateIdx] * 1000; }
 function updateRateDisplay() {
     const s = PASSIVE_RATES_S[passiveRateIdx];
     document.getElementById('rate-display').textContent =
-        s < 1 ? (s * 1000) + ' ms / step' : s + ' s / step';
+        s < 1 ? (s * 1000) + 'ms' : s + 's';
 }
 
 function setPassiveAging(enabled) {
@@ -192,76 +188,87 @@ function setPassiveAging(enabled) {
     const btn = document.getElementById('btn-passive');
     if (enabled) {
         passiveTimer = setInterval(() => {
-            // Age the base snapshot too — otherwise the cursor-blink restore
-            // would overwrite the aged state, freezing the image while typing.
+            // Age the base snapshot in sync so the cursor-blink restore doesn't
+            // revert the canvas to an un-aged state while text is being typed.
             if (textBaseIndices) textBaseIndices = _doAgeStep(textBaseIndices, false);
             indices = _doAgeStep(indices, false);
-            // If text is being typed, re-blit so the preview stays on top.
             if (textCursor) _blitText(textBuffer + (cursorBlink ? '|' : ''));
             else render();
             updateMetric();
         }, passiveIntervalMs());
         btn.classList.add('active');
-        btn.textContent = 'Passive aging  ON';
+        btn.textContent = 'Auto  ON';
     } else {
         btn.classList.remove('active');
-        btn.textContent = 'Passive aging  off';
+        btn.textContent = 'Auto  off';
     }
 }
 
 // ── Text tool ────────────────────────────────────────────────────────────────
 //
-// Renders text in the current palette color using National Park (woff2).
-// Click canvas to place the baseline cursor; type to build up a string.
-// Enter moves the cursor down one line; Escape cancels without committing.
-// Switching to any other tool or clicking T again commits pending text.
+// Font size tracks the active brush: fine → 16 px, medium → 40 px, thick → 80 px.
+// Click canvas to place a baseline cursor, type to build the string.
+// Enter advances to the next line; Escape cancels without committing.
+// Switching tools commits any pending text.
 
-// Font size is derived from the current brushSize at render time so the brush
-// selector controls both stroke width and text size.
-const BRUSH_FONT = { 4: 16, 12: 40, 28: 80 };
-function textFontSize() { return BRUSH_FONT[brushSize] ?? Math.round(brushSize * 2.8); }
+const BRUSH_FONT = { 2: 16, 6: 40, 14: 80 };
+function textFontSize() { return BRUSH_FONT[brushSize] ?? Math.round(brushSize * 3); }
 
 let textMode        = false;
-let textCursor      = null;   // {x, y} baseline in canvas pixels
+let textCursor      = null;
 let textBuffer      = '';
-let textBaseIndices = null;   // indices snapshot at start of current line
+let textBaseIndices = null;
 let cursorBlink     = true;
 let cursorTimer     = null;
 
-// Persistent offscreen canvas for text rasterisation — avoids repeated
-// allocations on every keypress and cursor blink.
 let textHelper    = null;
 let textHelperCtx = null;
 
 function getTextCtx() {
-    if (!textHelper) {
-        textHelper    = document.createElement('canvas');
+    if (!textHelper || textHelper.width !== W || textHelper.height !== H) {
+        textHelper        = document.createElement('canvas');
         textHelper.width  = W;
         textHelper.height = H;
-        textHelperCtx = textHelper.getContext('2d');
+        textHelperCtx     = textHelper.getContext('2d');
     }
     return textHelperCtx;
 }
 
+// Enter/exit text mode cleanly, committing or discarding the pending entry.
 function setTextMode(on) {
     if (on === textMode) return;
     textMode = on;
     if (!on) {
-        _commitText();
         stopCursorBlink();
+        if (textCursor) {
+            if (textBuffer) {
+                _blitText(textBuffer);      // bake glyphs without the cursor bar
+            } else if (textBaseIndices) {
+                indices.set(textBaseIndices); // nothing typed — clear cursor artifact
+                render();
+            }
+        }
+        textCursor = null; textBuffer = ''; textBaseIndices = null;
         canvas.style.cursor = 'crosshair';
         document.getElementById('tool-text').classList.remove('active');
     } else {
-        textCursor      = null;
-        textBuffer      = '';
-        textBaseIndices = null;
+        textCursor = null; textBuffer = ''; textBaseIndices = null;
         canvas.style.cursor = 'text';
         document.getElementById('tool-text').classList.add('active');
     }
 }
 
 function placeTextCursor(cx, cy) {
-    if (textCursor !== null) _commitText();
+    // Commit anything already typed before moving the cursor.
+    if (textCursor !== null) {
+        stopCursorBlink();
+        if (textBuffer) {
+            _blitText(textBuffer);
+        } else if (textBaseIndices) {
+            indices.set(textBaseIndices);
+            render();
+        }
+    }
     textCursor      = { x: cx, y: cy };
     textBuffer      = '';
     textBaseIndices = indices.slice();
@@ -282,32 +289,21 @@ function stopCursorBlink() {
     cursorTimer = null;
 }
 
-function _commitText() {
-    if (!textCursor || !textBuffer) return;
-    stopCursorBlink();
-    _blitText(textBuffer);
-    textBaseIndices = indices.slice();
-    textBuffer      = '';
-}
-
-// Rasterise `text` into the global `indices` at `textCursor` using the
-// current colorIdx. Reads the offscreen canvas pixel-by-pixel and maps
-// any opaque pixel to the selected palette slot.
 function _blitText(text) {
     if (!textCursor) return;
     if (textBaseIndices) indices.set(textBaseIndices);
     if (!text) { render(); return; }
 
-    const ctx  = getTextCtx();
-    const fs   = textFontSize();
+    const ctx = getTextCtx();
+    const fs  = textFontSize();
     ctx.clearRect(0, 0, W, H);
     ctx.font      = `${fs}px "National Park", serif`;
     ctx.fillStyle = '#000000';
     ctx.fillText(text, textCursor.x, textCursor.y);
 
     const m       = ctx.measureText(text);
-    const ascent  = (m.fontBoundingBoxAscent  ?? fs)           + 4;
-    const descent = (m.fontBoundingBoxDescent ?? Math.ceil(fs * 0.3)) + 4;
+    const ascent  = (m.fontBoundingBoxAscent  ?? fs)                   + 4;
+    const descent = (m.fontBoundingBoxDescent ?? Math.ceil(fs * 0.3))  + 4;
 
     const x0 = Math.max(0, Math.floor(textCursor.x - 2));
     const y0 = Math.max(0, Math.floor(textCursor.y - ascent));
@@ -319,9 +315,8 @@ function _blitText(text) {
         const bw  = x1 - x0, bh = y1 - y0;
         for (let row = 0; row < bh; row++) {
             for (let col = 0; col < bw; col++) {
-                if (img.data[(row * bw + col) * 4 + 3] > 64) {
+                if (img.data[(row * bw + col) * 4 + 3] > 64)
                     indices[(y0 + row) * W + (x0 + col)] = colorIdx;
-                }
             }
         }
     }
@@ -351,10 +346,10 @@ function loadFmrl(arrayBuffer) {
         [W, H] = [fileW, fileH];
         canvas.width  = W;
         canvas.height = H;
-        textHelper = null; // reset offscreen canvas to match new dims
+        textHelper = null;
 
-        indices = new Uint8Array(decode_to_indices(bytes));
-        indices = _doAgeStep(indices, true);
+        indices  = new Uint8Array(decode_to_indices(bytes));
+        indices  = _doAgeStep(indices, true);
         render();
         lastSize = 0;
         updateMetric();
@@ -383,14 +378,13 @@ async function main() {
     canvas.height = H;
     indices = new Uint8Array(W * H).fill(1);
 
-    // Kick off async font load so it's ready when the text tool is first used.
     document.fonts.load(`${textFontSize()}px "National Park"`).catch(() => {});
 
     document.getElementById('overlay').classList.add('hidden');
     render();
     updateMetric();
 
-    // ── Drawing events ──────────────────────────────────────────────────────
+    // ── Canvas events ───────────────────────────────────────────────────────
     canvas.addEventListener('mousedown', e => {
         if (textMode) { placeTextCursor(...canvasCoords(e)); return; }
         drawing = true;
@@ -428,20 +422,27 @@ async function main() {
         if (!textMode || !textCursor) return;
         e.preventDefault();
         if (e.key === 'Escape') {
-            if (textBaseIndices) indices.set(textBaseIndices);
-            textBuffer = ''; textCursor = null;
-            stopCursorBlink(); render(); return;
+            stopCursorBlink();
+            if (textBaseIndices) { indices.set(textBaseIndices); render(); }
+            textCursor = null; textBuffer = ''; textBaseIndices = null;
+            return;
         }
         if (e.key === 'Enter') {
             const lineH = Math.round(textFontSize() * 1.4);
-            _commitText();
-            textCursor = { x: textCursor.x, y: textCursor.y + lineH };
+            stopCursorBlink();
+            if (textBuffer) _blitText(textBuffer);
+            else if (textBaseIndices) { /* nothing typed, cursor stays clean */ }
+            const newY = textCursor.y + lineH;
+            textCursor      = { x: textCursor.x, y: newY };
+            textBuffer      = '';
             textBaseIndices = indices.slice();
-            startCursorBlink(); return;
+            startCursorBlink();
+            return;
         }
         if (e.key === 'Backspace') {
             textBuffer = textBuffer.slice(0, -1);
-            _blitText(textBuffer + (cursorBlink ? '|' : '')); return;
+            _blitText(textBuffer + (cursorBlink ? '|' : ''));
+            return;
         }
         if (e.key.length === 1) {
             textBuffer += e.key;
@@ -461,27 +462,32 @@ async function main() {
     // ── Brush ────────────────────────────────────────────────────────────────
     document.querySelectorAll('.brush-btn').forEach(btn =>
         btn.addEventListener('click', () => {
-            if (btn.id === 'tool-text') return; // handled separately
+            if (btn.id === 'tool-text') return; // handled separately below
+            setTextMode(false);
             document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             brushSize = parseInt(btn.dataset.size, 10);
-            setTextMode(false);
         })
     );
 
     // ── Text tool ────────────────────────────────────────────────────────────
     document.getElementById('tool-text').addEventListener('click', () => {
-        setTextMode(!textMode);
-        if (!textMode) {
-            // Re-activate whichever brush-btn was last active.
-            const active = document.querySelector('.brush-btn[data-size].active');
-            if (!active) document.querySelector('.brush-btn[data-size]').classList.add('active');
+        const entering = !textMode;
+        if (!entering) {
+            setTextMode(false);
+            // Restore the previously active brush button visual
+            const prev = document.querySelector('.brush-btn[data-size]');
+            if (prev && !document.querySelector('.brush-btn.active')) prev.classList.add('active');
+        } else {
+            document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
+            setTextMode(true);
+            document.getElementById('tool-text').classList.add('active');
         }
     });
 
     // ── Age controls ─────────────────────────────────────────────────────────
-    document.getElementById('btn-age').addEventListener('click',    () => applyAge(1));
-    document.getElementById('btn-age10').addEventListener('click',  () => applyAge(10));
+    document.getElementById('btn-age').addEventListener('click',   () => applyAge(1));
+    document.getElementById('btn-age10').addEventListener('click', () => applyAge(10));
     document.getElementById('btn-passive').addEventListener('click', e =>
         setPassiveAging(!e.currentTarget.classList.contains('active')));
     document.getElementById('btn-rate-down').addEventListener('click', () => {
