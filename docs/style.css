@@ -1,3 +1,11 @@
+/* ── Fonts ──────────────────────────────────────── */
+@font-face {
+  font-family: 'National Park';
+  src: url('fonts/NationalPark-VariableVF.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+}
+
 :root {
   --bg:        #12100d;
   --surface:   #1c1912;
@@ -122,6 +130,28 @@ html, body {
   justify-content: center;
   font-size: 0.65rem;
   color: var(--text-dim);
+}
+
+/* ── Text size buttons (tray) ───────────────────── */
+.textsize-btn {
+  min-width: 2.4rem;
+  height: 2.1rem;
+  padding: 0 0.4rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-family: var(--sans);
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.1s, color 0.1s;
+}
+.textsize-btn.active {
+  border-color: var(--bright);
+  color: var(--bright);
 }
 
 /* ── Brush buttons ──────────────────────────────── */

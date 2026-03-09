@@ -1,9 +1,20 @@
 import init, { FmrlView, encode_rgba, decode_to_indices } from './pkg/fmrl.js';
 
-// ── Canvas dimensions — set from window on init, updated when loading a file ─
+// ── Canvas dimensions ───────────────────────────────────────────────────────
+// Set from window on init (capped so the larger dimension ≤ 1024), updated
+// on file load. Both dimensions are rounded to the nearest multiple of 32
+// (the codec tile boundary). CSS scales the canvas to fill the viewport.
 
 let W = 0;
 let H = 0;
+
+function computeCanvasDims(srcW, srcH) {
+    const MAX = 1024;
+    const scale = Math.min(1, MAX / Math.max(srcW, srcH));
+    const w = Math.min(Math.ceil(srcW * scale / 32) * 32, MAX);
+    const h = Math.min(Math.ceil(srcH * scale / 32) * 32, MAX);
+    return [w, h];
+}
 
 // Default palette: ink, paper, crimson, white
 const PALETTE = [
@@ -21,7 +32,7 @@ let brushSize = 4;
 let drawing   = false;
 let lastX     = -1;
 let lastY     = -1;
-let lastSize  = 0;  // previous .fmrl byte count for Δ display
+let lastSize  = 0;
 
 // ── Rendering ───────────────────────────────────────────────────────────────
 
@@ -73,30 +84,16 @@ function paintLine(x0, y0, x1, y1) {
 // ── Aging ───────────────────────────────────────────────────────────────────
 //
 // _doAgeStep(src, full):
-//
 //   full=true  — morphological erosion + short-run elimination.
-//                Used by the manual Age button, Age 10×, and save.
-//                Maximum data removal per step; file size decreases
-//                monotonically.  Convergence to all-paper is guaranteed.
-//
-//   full=false — morphological erosion only (no short-run elimination).
-//                Used by passive aging at high rates (50 ms–2 s) so each
-//                individual step is fine-grained and the animation reads as
-//                continuous decay rather than discrete jumps.
-//
-// Both modes only convert non-paper pixels to paper — information is strictly
-// non-increasing and convergence to all-paper is guaranteed for both.
+//   full=false — morphological erosion only (for fluid passive aging).
 
-const RUN_THRESHOLD = 2; // runs ≤ this many pixels wide are erased (full mode)
+const RUN_THRESHOLD = 2;
 
 function _doAgeStep(src, full = true) {
     const next = src.slice();
     const w = W, h = H;
 
     // Pass 1: morphological erosion (≥3 paper 8-neighbours → paper).
-    // Threshold 3 ensures face pixels of solid blocks are always eligible:
-    // every finite non-paper cluster has at least one such pixel, so
-    // convergence to all-paper is guaranteed.
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
             if (src[y * w + x] === 1) continue;
@@ -124,9 +121,7 @@ function _doAgeStep(src, full = true) {
                 if (e - x <= RUN_THRESHOLD)
                     for (let rx = x; rx < e; rx++) next[y * w + rx] = 1;
                 x = e;
-            } else {
-                x++;
-            }
+            } else { x++; }
         }
     }
 
@@ -139,16 +134,13 @@ function _doAgeStep(src, full = true) {
                 if (e - y <= RUN_THRESHOLD)
                     for (let ry = y; ry < e; ry++) next[ry * w + x] = 1;
                 y = e;
-            } else {
-                y++;
-            }
+            } else { y++; }
         }
     }
 
     return next;
 }
 
-// Run n full age steps on the global canvas and re-render once.
 function applyAge(n = 1) {
     for (let i = 0; i < n; i++) indices = _doAgeStep(indices, true);
     render();
@@ -171,7 +163,6 @@ function updateMetric() {
     const fmrl = encode_rgba(indicesToRgba(), W, H);
     const size = fmrl.length;
     const el   = document.getElementById('size-metric');
-
     let text = `${size.toLocaleString()} bytes`;
     if (lastSize > 0) {
         const diff = size - lastSize;
@@ -182,26 +173,17 @@ function updateMetric() {
 }
 
 // ── Passive aging ────────────────────────────────────────────────────────────
-//
-// Uses a light step (erosion only, no run elimination) so high-rate passive
-// aging feels fluid — each step removes a thin boundary layer rather than
-// collapsing entire short features all at once.
 
-// Available intervals in seconds, fastest → slowest.
-// − button moves toward slower (higher index), + toward faster (lower index).
 const PASSIVE_RATES_S = [0.05, 0.1, 0.2, 0.5, 1, 2];
-let passiveRateIdx = 4; // default: 1 s/step
+let passiveRateIdx = 4;
+let passiveTimer   = null;
 
-let passiveTimer = null;
-
-function passiveIntervalMs() {
-    return PASSIVE_RATES_S[passiveRateIdx] * 1000;
-}
+function passiveIntervalMs() { return PASSIVE_RATES_S[passiveRateIdx] * 1000; }
 
 function updateRateDisplay() {
     const s = PASSIVE_RATES_S[passiveRateIdx];
-    const text = s < 1 ? (s * 1000) + ' ms / step' : s + ' s / step';
-    document.getElementById('rate-display').textContent = text;
+    document.getElementById('rate-display').textContent =
+        s < 1 ? (s * 1000) + ' ms / step' : s + ' s / step';
 }
 
 function setPassiveAging(enabled) {
@@ -210,7 +192,7 @@ function setPassiveAging(enabled) {
     const btn = document.getElementById('btn-passive');
     if (enabled) {
         passiveTimer = setInterval(() => {
-            indices = _doAgeStep(indices, false); // light step — erosion only
+            indices = _doAgeStep(indices, false);
             render();
             updateMetric();
         }, passiveIntervalMs());
@@ -222,16 +204,127 @@ function setPassiveAging(enabled) {
     }
 }
 
+// ── Text tool ────────────────────────────────────────────────────────────────
+//
+// Renders text in the current palette color using National Park (woff2).
+// Click canvas to place the baseline cursor; type to build up a string.
+// Enter moves the cursor down one line; Escape cancels without committing.
+// Switching to any other tool or clicking T again commits pending text.
+
+let textMode        = false;
+let textCursor      = null;   // {x, y} baseline in canvas pixels
+let textBuffer      = '';
+let textBaseIndices = null;   // indices snapshot at start of current line
+let textFontSize    = 32;
+let cursorBlink     = true;
+let cursorTimer     = null;
+
+// Persistent offscreen canvas for text rasterisation — avoids repeated
+// allocations on every keypress and cursor blink.
+let textHelper    = null;
+let textHelperCtx = null;
+
+function getTextCtx() {
+    if (!textHelper) {
+        textHelper    = document.createElement('canvas');
+        textHelper.width  = W;
+        textHelper.height = H;
+        textHelperCtx = textHelper.getContext('2d');
+    }
+    return textHelperCtx;
+}
+
+function setTextMode(on) {
+    if (on === textMode) return;
+    textMode = on;
+    if (!on) {
+        _commitText();
+        stopCursorBlink();
+        canvas.style.cursor = 'crosshair';
+        document.getElementById('tool-text').classList.remove('active');
+    } else {
+        textCursor      = null;
+        textBuffer      = '';
+        textBaseIndices = null;
+        canvas.style.cursor = 'text';
+        document.getElementById('tool-text').classList.add('active');
+    }
+}
+
+function placeTextCursor(cx, cy) {
+    if (textCursor !== null) _commitText();
+    textCursor      = { x: cx, y: cy };
+    textBuffer      = '';
+    textBaseIndices = indices.slice();
+    startCursorBlink();
+}
+
+function startCursorBlink() {
+    stopCursorBlink();
+    cursorBlink = true;
+    cursorTimer = setInterval(() => {
+        cursorBlink = !cursorBlink;
+        _blitText(textBuffer + (cursorBlink ? '|' : ''));
+    }, 530);
+}
+
+function stopCursorBlink() {
+    clearInterval(cursorTimer);
+    cursorTimer = null;
+}
+
+function _commitText() {
+    if (!textCursor || !textBuffer) return;
+    stopCursorBlink();
+    _blitText(textBuffer);
+    textBaseIndices = indices.slice();
+    textBuffer      = '';
+}
+
+// Rasterise `text` into the global `indices` at `textCursor` using the
+// current colorIdx. Reads the offscreen canvas pixel-by-pixel and maps
+// any opaque pixel to the selected palette slot.
+function _blitText(text) {
+    if (!textCursor) return;
+    if (textBaseIndices) indices.set(textBaseIndices);
+    if (!text) { render(); return; }
+
+    const ctx  = getTextCtx();
+    const font = `${textFontSize}px "National Park", serif`;
+    ctx.clearRect(0, 0, W, H);
+    ctx.font      = font;
+    ctx.fillStyle = '#000000';
+    ctx.fillText(text, textCursor.x, textCursor.y);
+
+    const m       = ctx.measureText(text);
+    const ascent  = (m.fontBoundingBoxAscent  ?? textFontSize)           + 4;
+    const descent = (m.fontBoundingBoxDescent ?? Math.ceil(textFontSize * 0.3)) + 4;
+
+    const x0 = Math.max(0, Math.floor(textCursor.x - 2));
+    const y0 = Math.max(0, Math.floor(textCursor.y - ascent));
+    const x1 = Math.min(W, Math.ceil(textCursor.x + Math.max(m.width, 4) + 4));
+    const y1 = Math.min(H, Math.ceil(textCursor.y + descent));
+
+    if (x1 > x0 && y1 > y0) {
+        const img = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+        const bw  = x1 - x0, bh = y1 - y0;
+        for (let row = 0; row < bh; row++) {
+            for (let col = 0; col < bw; col++) {
+                if (img.data[(row * bw + col) * 4 + 3] > 64) {
+                    indices[(y0 + row) * W + (x0 + col)] = colorIdx;
+                }
+            }
+        }
+    }
+    render();
+}
+
 // ── Save / Load ─────────────────────────────────────────────────────────────
 
 function saveFmrl() {
     try {
-        // Bake 10 full erosion steps into the saved copy.  The file will be
-        // noticeably aged when next opened (which applies one more step).
-        // The live canvas is not affected.
         let aged = indices.slice();
         for (let i = 0; i < 10; i++) aged = _doAgeStep(aged, true);
-
         const bytes = encode_rgba(indicesToRgba(aged), W, H);
         const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
         Object.assign(document.createElement('a'), { href: url, download: 'manuscript.fmrl' }).click();
@@ -246,11 +339,12 @@ function loadFmrl(arrayBuffer) {
         const fileW = peek.width(), fileH = peek.height();
         peek.free();
 
-        canvas.width = fileW; canvas.height = fileH;
-        W = fileW; H = fileH;
+        [W, H] = [fileW, fileH];
+        canvas.width  = W;
+        canvas.height = H;
+        textHelper = null; // reset offscreen canvas to match new dims
 
         indices = new Uint8Array(decode_to_indices(bytes));
-        // Opening a file ages it — one erosion step representing elapsed time.
         indices = _doAgeStep(indices, true);
         render();
         lastSize = 0;
@@ -260,11 +354,10 @@ function loadFmrl(arrayBuffer) {
 
 // ── Tray ────────────────────────────────────────────────────────────────────
 
-function openTray() {
+function openTray()  {
     document.getElementById('tray').classList.add('open');
     document.getElementById('tray-backdrop').classList.add('visible');
 }
-
 function closeTray() {
     document.getElementById('tray').classList.remove('open');
     document.getElementById('tray-backdrop').classList.remove('visible');
@@ -276,20 +369,21 @@ async function main() {
     await init();
 
     canvas = document.getElementById('canvas');
-    // Dimensions must be multiples of 32 (tile size required by the codec).
-    // Round up so the canvas always covers the full viewport; the extra pixels
-    // (at most 31 on each edge) are clipped by the CSS overflow.
-    W = Math.ceil(window.innerWidth  / 32) * 32;
-    H = Math.ceil(window.innerHeight / 32) * 32;
+    [W, H] = computeCanvasDims(window.innerWidth, window.innerHeight);
     canvas.width  = W;
     canvas.height = H;
     indices = new Uint8Array(W * H).fill(1);
+
+    // Kick off async font load so it's ready when the text tool is first used.
+    document.fonts.load(`${textFontSize}px "National Park"`).catch(() => {});
+
     document.getElementById('overlay').classList.add('hidden');
     render();
     updateMetric();
 
-    // Drawing events
+    // ── Drawing events ──────────────────────────────────────────────────────
     canvas.addEventListener('mousedown', e => {
+        if (textMode) { placeTextCursor(...canvasCoords(e)); return; }
         drawing = true;
         [lastX, lastY] = canvasCoords(e);
         paintAt(lastX, lastY); render();
@@ -306,7 +400,9 @@ async function main() {
     canvas.addEventListener('mouseleave', stopDrawing);
 
     canvas.addEventListener('touchstart', e => {
-        e.preventDefault(); drawing = true;
+        e.preventDefault();
+        if (textMode) { placeTextCursor(...canvasCoords(e)); return; }
+        drawing = true;
         [lastX, lastY] = canvasCoords(e);
         paintAt(lastX, lastY); render();
     }, { passive: false });
@@ -318,7 +414,33 @@ async function main() {
     }, { passive: false });
     canvas.addEventListener('touchend', e => { e.preventDefault(); stopDrawing(); }, { passive: false });
 
-    // Palette
+    // ── Keyboard (text tool) ────────────────────────────────────────────────
+    document.addEventListener('keydown', e => {
+        if (!textMode || !textCursor) return;
+        e.preventDefault();
+        if (e.key === 'Escape') {
+            if (textBaseIndices) indices.set(textBaseIndices);
+            textBuffer = ''; textCursor = null;
+            stopCursorBlink(); render(); return;
+        }
+        if (e.key === 'Enter') {
+            const lineH = Math.round(textFontSize * 1.4);
+            _commitText();
+            textCursor = { x: textCursor.x, y: textCursor.y + lineH };
+            textBaseIndices = indices.slice();
+            startCursorBlink(); return;
+        }
+        if (e.key === 'Backspace') {
+            textBuffer = textBuffer.slice(0, -1);
+            _blitText(textBuffer + (cursorBlink ? '|' : '')); return;
+        }
+        if (e.key.length === 1) {
+            textBuffer += e.key;
+            _blitText(textBuffer + (cursorBlink ? '|' : ''));
+        }
+    });
+
+    // ── Palette ─────────────────────────────────────────────────────────────
     document.querySelectorAll('.swatch').forEach(btn =>
         btn.addEventListener('click', () => {
             document.querySelectorAll('.swatch').forEach(b => b.classList.remove('active'));
@@ -327,34 +449,56 @@ async function main() {
         })
     );
 
-    // Brush
+    // ── Brush ────────────────────────────────────────────────────────────────
     document.querySelectorAll('.brush-btn').forEach(btn =>
         btn.addEventListener('click', () => {
+            if (btn.id === 'tool-text') return; // handled separately
             document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             brushSize = parseInt(btn.dataset.size, 10);
+            setTextMode(false);
         })
     );
 
+    // ── Text tool ────────────────────────────────────────────────────────────
+    document.getElementById('tool-text').addEventListener('click', () => {
+        setTextMode(!textMode);
+        if (!textMode) {
+            // Re-activate whichever brush-btn was last active.
+            const active = document.querySelector('.brush-btn[data-size].active');
+            if (!active) document.querySelector('.brush-btn[data-size]').classList.add('active');
+        }
+    });
+
+    document.querySelectorAll('.textsize-btn').forEach(btn =>
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.textsize-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            textFontSize = parseInt(btn.dataset.size, 10);
+        })
+    );
+
+    // ── Age controls ─────────────────────────────────────────────────────────
     document.getElementById('btn-age').addEventListener('click',    () => applyAge(1));
-    document.getElementById('btn-age10').addEventListener('click',   () => applyAge(10));
-    document.getElementById('btn-passive').addEventListener('click', e => setPassiveAging(!e.currentTarget.classList.contains('active')));
+    document.getElementById('btn-age10').addEventListener('click',  () => applyAge(10));
+    document.getElementById('btn-passive').addEventListener('click', e =>
+        setPassiveAging(!e.currentTarget.classList.contains('active')));
     document.getElementById('btn-rate-down').addEventListener('click', () => {
         if (passiveRateIdx < PASSIVE_RATES_S.length - 1) {
-            passiveRateIdx++;
-            updateRateDisplay();
+            passiveRateIdx++; updateRateDisplay();
             if (passiveTimer) setPassiveAging(true);
         }
     });
     document.getElementById('btn-rate-up').addEventListener('click', () => {
         if (passiveRateIdx > 0) {
-            passiveRateIdx--;
-            updateRateDisplay();
+            passiveRateIdx--; updateRateDisplay();
             if (passiveTimer) setPassiveAging(true);
         }
     });
     updateRateDisplay();
+
     document.getElementById('btn-clear').addEventListener('click', () => {
+        setTextMode(false);
         indices.fill(1); render(); lastSize = 0; updateMetric();
     });
     document.getElementById('btn-save').addEventListener('click', saveFmrl);
@@ -366,7 +510,7 @@ async function main() {
         e.target.value = '';
     });
 
-    // Tray
+    // ── Tray ─────────────────────────────────────────────────────────────────
     document.getElementById('tray-toggle').addEventListener('click', openTray);
     document.getElementById('tray-close').addEventListener('click',  closeTray);
     document.getElementById('tray-backdrop').addEventListener('click', closeTray);
