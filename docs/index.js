@@ -276,8 +276,11 @@ async function main() {
     await init();
 
     canvas = document.getElementById('canvas');
-    W = window.innerWidth;
-    H = window.innerHeight;
+    // Dimensions must be multiples of 32 (tile size required by the codec).
+    // Round up so the canvas always covers the full viewport; the extra pixels
+    // (at most 31 on each edge) are clipped by the CSS overflow.
+    W = Math.ceil(window.innerWidth  / 32) * 32;
+    H = Math.ceil(window.innerHeight / 32) * 32;
     canvas.width  = W;
     canvas.height = H;
     indices = new Uint8Array(W * H).fill(1);
