@@ -9,14 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Whiteboard layout: canvas fills the full viewport (sized to the next multiple of 32 in each dimension); all controls moved to a slide-in tray (right on desktop, bottom-slide on mobile ≤540 px wide)
-- Floating mini-toolbar stays visible on the canvas at all times: color swatches, brush sizes, and a ☰ button to open the tray; tray closes via × or backdrop tap
+- Whiteboard layout: canvas fills the full viewport; all controls moved to a slide-in tray (right on desktop, bottom-slide on mobile ≤540 px wide)
+- Floating mini-toolbar stays visible on the canvas at all times: color swatches, brush sizes, text tool, and a ☰ button to open the tray; tray closes via × or backdrop tap
 - Two-tier aging: `_doAgeStep(src, full)` replaces `ageStep()` — `full=true` (morphological erosion + short-run elimination, used by Age / Age 10×) for maximum data removal per step; `full=false` (erosion only, used by passive aging) for fine-grained fluid degradation at sub-second rates
 - Save bakes 10 full erosion steps into the encoded copy without touching the live canvas; the next open applies one more step, making temporal decay clearly visible across save/load cycles
+- Text tool (`T` button): click canvas to place a baseline cursor, type to render text in the current palette color using National Park (variable woff2); Enter commits the line and advances the cursor, Escape cancels; text ages identically to drawn strokes
+- Font size picker in tray: S / M / L / XL (16 / 32 / 52 / 80 canvas pixels)
+- National Park variable-weight woff2 font family (ExtraLight → ExtraBold) added to `docs/fonts/`; loaded via `@font-face` with an async JS preload on init
+- Canvas resolution capped at 1024 px on the larger dimension (aspect ratio preserved, both dimensions rounded to multiples of 32); CSS still scales to fill the viewport — intentionally pixelated at high display resolutions for faster encoding and rendering
 
 ### Fixed
 
-- Canvas dimensions are now rounded up to the nearest multiple of 32 before being passed to `encode_rgba`; `window.innerWidth/innerHeight` are almost never divisible by 32, causing a "malformed chunk: dimensions must be multiples of 32" WASM panic that prevented all canvas interaction
+- Canvas dimensions are now rounded to the nearest multiple of 32 before being passed to `encode_rgba`; `window.innerWidth/innerHeight` are almost never divisible by 32, causing a "malformed chunk: dimensions must be multiples of 32" WASM panic that prevented all canvas interaction
 
 ## [0.1.0] - 2026-03-08
 
