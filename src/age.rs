@@ -1,6 +1,6 @@
 /// Number of consecutive non-paper pixels in a row or column that will be
 /// erased.  Runs of this length or shorter become paper.
-const RUN_THRESHOLD: usize = 2;
+const RUN_THRESHOLD: usize = 1;
 
 /// Apply one aging step to a flat, row-major array of palette indices.
 ///

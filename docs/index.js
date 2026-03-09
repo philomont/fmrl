@@ -87,7 +87,7 @@ function paintLine(x0, y0, x1, y1) {
 //   full=true  — morphological erosion + short-run elimination.
 //   full=false — morphological erosion only (for fluid passive aging).
 
-const RUN_THRESHOLD = 2;
+const RUN_THRESHOLD = 1; // only single isolated pixels are eliminated (finer decay steps)
 
 function _doAgeStep(src, full = true) {
     const next = src.slice();
@@ -192,8 +192,13 @@ function setPassiveAging(enabled) {
     const btn = document.getElementById('btn-passive');
     if (enabled) {
         passiveTimer = setInterval(() => {
+            // Age the base snapshot too — otherwise the cursor-blink restore
+            // would overwrite the aged state, freezing the image while typing.
+            if (textBaseIndices) textBaseIndices = _doAgeStep(textBaseIndices, false);
             indices = _doAgeStep(indices, false);
-            render();
+            // If text is being typed, re-blit so the preview stays on top.
+            if (textCursor) _blitText(textBuffer + (cursorBlink ? '|' : ''));
+            else render();
             updateMetric();
         }, passiveIntervalMs());
         btn.classList.add('active');
@@ -211,11 +216,15 @@ function setPassiveAging(enabled) {
 // Enter moves the cursor down one line; Escape cancels without committing.
 // Switching to any other tool or clicking T again commits pending text.
 
+// Font size is derived from the current brushSize at render time so the brush
+// selector controls both stroke width and text size.
+const BRUSH_FONT = { 4: 16, 12: 40, 28: 80 };
+function textFontSize() { return BRUSH_FONT[brushSize] ?? Math.round(brushSize * 2.8); }
+
 let textMode        = false;
 let textCursor      = null;   // {x, y} baseline in canvas pixels
 let textBuffer      = '';
 let textBaseIndices = null;   // indices snapshot at start of current line
-let textFontSize    = 32;
 let cursorBlink     = true;
 let cursorTimer     = null;
 
@@ -290,15 +299,15 @@ function _blitText(text) {
     if (!text) { render(); return; }
 
     const ctx  = getTextCtx();
-    const font = `${textFontSize}px "National Park", serif`;
+    const fs   = textFontSize();
     ctx.clearRect(0, 0, W, H);
-    ctx.font      = font;
+    ctx.font      = `${fs}px "National Park", serif`;
     ctx.fillStyle = '#000000';
     ctx.fillText(text, textCursor.x, textCursor.y);
 
     const m       = ctx.measureText(text);
-    const ascent  = (m.fontBoundingBoxAscent  ?? textFontSize)           + 4;
-    const descent = (m.fontBoundingBoxDescent ?? Math.ceil(textFontSize * 0.3)) + 4;
+    const ascent  = (m.fontBoundingBoxAscent  ?? fs)           + 4;
+    const descent = (m.fontBoundingBoxDescent ?? Math.ceil(fs * 0.3)) + 4;
 
     const x0 = Math.max(0, Math.floor(textCursor.x - 2));
     const y0 = Math.max(0, Math.floor(textCursor.y - ascent));
@@ -375,7 +384,7 @@ async function main() {
     indices = new Uint8Array(W * H).fill(1);
 
     // Kick off async font load so it's ready when the text tool is first used.
-    document.fonts.load(`${textFontSize}px "National Park"`).catch(() => {});
+    document.fonts.load(`${textFontSize()}px "National Park"`).catch(() => {});
 
     document.getElementById('overlay').classList.add('hidden');
     render();
@@ -424,7 +433,7 @@ async function main() {
             stopCursorBlink(); render(); return;
         }
         if (e.key === 'Enter') {
-            const lineH = Math.round(textFontSize * 1.4);
+            const lineH = Math.round(textFontSize() * 1.4);
             _commitText();
             textCursor = { x: textCursor.x, y: textCursor.y + lineH };
             textBaseIndices = indices.slice();
@@ -469,14 +478,6 @@ async function main() {
             if (!active) document.querySelector('.brush-btn[data-size]').classList.add('active');
         }
     });
-
-    document.querySelectorAll('.textsize-btn').forEach(btn =>
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.textsize-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            textFontSize = parseInt(btn.dataset.size, 10);
-        })
-    );
 
     // ── Age controls ─────────────────────────────────────────────────────────
     document.getElementById('btn-age').addEventListener('click',    () => applyAge(1));
