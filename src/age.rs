@@ -9,12 +9,10 @@ const RUN_THRESHOLD: usize = 2;
 ///
 /// Two passes, both of which can only convert pixels *to* paper:
 ///
-/// 1. **Morphological erosion** — any non-paper pixel with ≥ 3 paper
+/// 1. **Morphological erosion** — any non-paper pixel with ≥ 4 paper
 ///    8-neighbours (out-of-bounds treated as paper) becomes paper.
-///    This threshold ensures that every finite cluster of non-paper pixels
-///    has at least one pixel eligible for erosion each step (face pixels
-///    of a solid block carry exactly 3 paper neighbours), so convergence
-///    to all-paper is guaranteed.
+///    This gentler threshold ensures gradual erosion from edges while
+///    preserving the core of larger ink regions for multiple save/load cycles.
 ///
 /// 2. **Short-run elimination** — scan every row then every column.  Any
 ///    non-paper run whose length ≤ `RUN_THRESHOLD` becomes paper.  This
@@ -54,7 +52,8 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
                     }
                 }
             }
-            if paper_count >= 3 {
+            // Require 4+ paper neighbors (was 3) for gentler aging
+            if paper_count >= 4 {
                 next[y * w + x] = 1;
             }
         }
