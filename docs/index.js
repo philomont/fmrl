@@ -672,7 +672,7 @@ function saveFmrl() {
     } catch (e) { console.error('encode failed:', e); }
 }
 
-/// Save a debug PNG showing what was actually encoded
+/// Save a debug PNG showing what was actually encoded (grayscale, theme-independent)
 function saveDebugPng(fmrlBytes, width, height) {
     try {
         // Decode the FMRL back to see what was actually stored
@@ -685,14 +685,23 @@ function saveDebugPng(fmrlBytes, width, height) {
         const ctx = debugCanvas.getContext('2d');
         const imgData = ctx.createImageData(width, height);
 
-        // Use theme palette to render the decoded indices
-        const palette = getThemePalette();
+        // Fixed grayscale palette (matches storage format, theme-independent):
+        // 0 = ink → black, 1 = paper → transparent, 2 = accent → white, 3 = highlight → gray
+        const grayscalePalette = [
+            [0, 0, 0],         // 0: ink - black
+            [255, 255, 255],   // 1: paper - white (transparent via alpha=0)
+            [255, 255, 255],   // 2: accent - white
+            [128, 128, 128],   // 3: highlight - gray
+        ];
+
         for (let i = 0; i < width * height; i++) {
-            const [r, g, b] = palette[decodedIndices[i]];
+            const idx = decodedIndices[i];
+            const [r, g, b] = grayscalePalette[idx];
             imgData.data[i * 4]     = r;
             imgData.data[i * 4 + 1] = g;
             imgData.data[i * 4 + 2] = b;
-            imgData.data[i * 4 + 3] = 255;
+            // Paper (index 1) is transparent, others are opaque
+            imgData.data[i * 4 + 3] = idx === 1 ? 0 : 255;
         }
         ctx.putImageData(imgData, 0, 0);
 
