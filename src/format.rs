@@ -164,12 +164,17 @@ pub struct Palette(pub [[u8; 3]; 4]);
 
 impl Default for Palette {
     fn default() -> Self {
-        // Default matches themes.default in fmrl.toml
+        // Alpha-based palette for semantic color storage:
+        // These colors represent the "mask" that maps to theme colors:
+        // 0: ink       = full black (maps to theme --ink on render)
+        // 1: paper     = transparent (maps to theme --paper on render)
+        // 2: accent    = black 50% alpha (maps to theme --accent on render)
+        // 3: highlight = white 50% alpha (maps to theme --highlight on render)
         Palette([
-            [34, 34, 34],       // 0: ink
-            [250, 243, 225],   // 1: paper
-            [255, 109, 31],    // 2: accent (orange)
-            [245, 231, 198],   // 3: highlight
+            [0, 0, 0],         // 0: ink - full black
+            [255, 255, 255],   // 1: paper - white (transparent in alpha context)
+            [0, 0, 0],         // 2: accent - black (50% alpha applied elsewhere)
+            [255, 255, 255],   // 3: highlight - white (50% alpha applied elsewhere)
         ])
     }
 }

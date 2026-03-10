@@ -23,6 +23,19 @@ const PALETTE = [
     [245, 231, 198],   // 3: highlight
 ];
 
+// Alpha-based palette for file storage:
+// The FMRL file stores alpha values that map to theme colors:
+// 0 = ink (full black, 255 alpha) -> renders as theme --ink
+// 1 = paper (transparent, 0 alpha) -> renders as theme --paper
+// 2 = accent (black 50%, 128 alpha) -> renders as theme --accent
+// 3 = highlight (white 50%, 128 alpha) -> renders as theme --highlight
+const STORAGE_TO_THEME = [
+    'ink',      // 0: full black
+    'paper',    // 1: transparent
+    'accent',   // 2: black 50%
+    'highlight' // 3: white 50%
+];
+
 // Theme palette definitions loaded from themes.json (synced from fmrl.toml)
 let THEME_PALETTES = {};
 let customPalette = null; // For user-defined colors

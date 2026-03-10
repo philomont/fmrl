@@ -6,13 +6,14 @@ use flate2::write::ZlibEncoder;
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
-    IhdrChunk, MAGIC, Palette, TILE_SIZE, pack_nibbles, write_chunk,
+    ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, pack_nibbles, write_chunk,
 };
 
 /// Input image to encode
 pub struct FmrlImage {
     pub width: u16,
     pub height: u16,
+    pub color_mode: ColorMode,
     pub palette: Palette,
     /// RGBA row-major pixels, width*height*4 bytes
     pub pixels: Vec<u8>,
@@ -21,12 +22,26 @@ pub struct FmrlImage {
 }
 
 impl FmrlImage {
-    /// Create with the default aged-paper palette
+    /// Create with the default aged-paper palette (indexed mode)
     pub fn new(width: u16, height: u16, pixels: Vec<u8>) -> Self {
         FmrlImage {
             width,
             height,
+            color_mode: ColorMode::Indexed,
             palette: Palette::default(),
+            pixels,
+            decay_policy: 0,
+            meta: None,
+        }
+    }
+
+    /// Create in RGBA mode (full color, no palette quantization)
+    pub fn new_rgba(width: u16, height: u16, pixels: Vec<u8>) -> Self {
+        FmrlImage {
+            width,
+            height,
+            color_mode: ColorMode::Rgba,
+            palette: Palette::default(), // Still used for paper color reference
             pixels,
             decay_policy: 0,
             meta: None,
@@ -34,21 +49,46 @@ impl FmrlImage {
     }
 }
 
-/// Quantize an RGBA pixel to the nearest palette index (Euclidean distance on RGB).
-fn quantize_pixel(r: u8, g: u8, b: u8, palette: &Palette) -> u8 {
-    let mut best_idx = 0u8;
-    let mut best_dist = u32::MAX;
-    for (i, color) in palette.0.iter().enumerate() {
-        let dr = (r as i32) - (color[0] as i32);
-        let dg = (g as i32) - (color[1] as i32);
-        let db = (b as i32) - (color[2] as i32);
-        let dist = (dr * dr + dg * dg + db * db) as u32;
-        if dist < best_dist {
-            best_dist = dist;
-            best_idx = i as u8;
-        }
+/// Quantize an RGBA pixel to a palette index based on alpha semantics.
+///
+/// The palette indices represent semantic meanings that map to theme colors:
+/// 0 = ink (full black/opacity) → renders as theme --ink
+/// 1 = paper (transparent) → renders as theme --paper
+/// 2 = accent (black 50% alpha) → renders as theme --accent
+/// 3 = highlight (white 50% alpha) → renders as theme --highlight
+fn quantize_pixel(r: u8, g: u8, b: u8, a: u8, _palette: &Palette) -> u8 {
+    // First check alpha - transparent pixels are paper
+    if a < 64 {
+        return 1; // paper (transparent)
     }
-    best_idx
+
+    // Calculate brightness
+    let brightness = (r as u16 + g as u16 + b as u16) / 3;
+    let is_dark = brightness < 128;
+    let is_light = brightness > 200;
+
+    // Check alpha level for opacity
+    let is_mostly_opaque = a >= 200;
+    let is_semi_transparent = a >= 64 && a < 200;
+
+    if is_mostly_opaque {
+        // Full opacity = ink (for dark) or paper (for light)
+        if is_dark {
+            0 // ink - full black
+        } else {
+            1 // paper - treat light opaque as paper background
+        }
+    } else if is_semi_transparent {
+        // Semi-transparent = accent (for dark) or highlight (for light)
+        if is_light {
+            3 // highlight - white 50%
+        } else {
+            2 // accent - black 50%
+        }
+    } else {
+        // Fallback: dark = ink, light = paper
+        if is_dark { 0 } else { 1 }
+    }
 }
 
 /// Compress bytes with zlib (not raw DEFLATE).
@@ -79,48 +119,20 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     let tiles_x = w / TILE_SIZE;
     let tiles_y = h / TILE_SIZE;
 
-    // Step 1: quantize all pixels to palette indices
-    let mut indices = vec![0u8; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            let base = (y * w + x) * 4;
-            let r = image.pixels[base];
-            let g = image.pixels[base + 1];
-            let b = image.pixels[base + 2];
-            // alpha ignored for palette quantization
-            indices[y * w + x] = quantize_pixel(r, g, b, &image.palette);
-        }
-    }
-
     let mut out = Vec::new();
 
     // Magic
     out.extend_from_slice(&MAGIC);
 
     // IHDR chunk
-    let ihdr = IhdrChunk::new(image.width, image.height, image.decay_policy);
+    let ihdr = IhdrChunk::new(image.width, image.height, image.color_mode, image.decay_policy);
     write_chunk(&mut out, CHUNK_IHDR, &ihdr.to_bytes());
 
-    // DATA chunk: palette (12 bytes) + tiles
-    let mut data_payload: Vec<u8> = Vec::new();
-    // Palette: 4 colors × 3 bytes RGB
-    for color in &image.palette.0 {
-        data_payload.extend_from_slice(color);
+    // DATA chunk: mode-dependent
+    match image.color_mode {
+        ColorMode::Indexed => encode_indexed(&mut out, image, w, h, tiles_x, tiles_y)?,
+        ColorMode::Rgba => encode_rgba(&mut out, image, w, h, tiles_x, tiles_y)?,
     }
-
-    // Per-tile: [u16 compressed_len LE][u8 flags][compressed nibble data]
-    for ty in 0..tiles_y {
-        for tx in 0..tiles_x {
-            let tile_indices = extract_tile_indices(&indices, w, tx, ty);
-            let packed = pack_nibbles(&tile_indices);
-            let compressed = zlib_compress(&packed)?;
-            let len = compressed.len() as u16;
-            data_payload.extend_from_slice(&len.to_le_bytes());
-            data_payload.push(0u8); // flags
-            data_payload.extend_from_slice(&compressed);
-        }
-    }
-    write_chunk(&mut out, CHUNK_DATA, &data_payload);
 
     // AGE chunk: one entry per tile (row-major)
     let mut age_payload = Vec::with_capacity(tiles_x * tiles_y * AGE_ENTRY_BYTES);
@@ -152,6 +164,91 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     write_chunk(&mut out, CHUNK_IEND, &[]);
 
     Ok(out)
+}
+
+/// Encode indexed mode: palette (12 bytes) + packed nibble tiles
+fn encode_indexed(
+    out: &mut Vec<u8>,
+    image: &FmrlImage,
+    w: usize,
+    h: usize,
+    tiles_x: usize,
+    tiles_y: usize,
+) -> Result<(), FmrlError> {
+    // Step 1: quantize all pixels to palette indices
+    let mut indices = vec![0u8; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let base = (y * w + x) * 4;
+            let r = image.pixels[base];
+            let g = image.pixels[base + 1];
+            let b = image.pixels[base + 2];
+            let a = image.pixels[base + 3];
+            indices[y * w + x] = quantize_pixel(r, g, b, a, &image.palette);
+        }
+    }
+
+    // DATA chunk: palette (12 bytes) + tiles
+    let mut data_payload: Vec<u8> = Vec::new();
+    // Palette: 4 colors × 3 bytes RGB
+    for color in &image.palette.0 {
+        data_payload.extend_from_slice(color);
+    }
+
+    // Per-tile: [u16 compressed_len LE][u8 flags][compressed nibble data]
+    for ty in 0..tiles_y {
+        for tx in 0..tiles_x {
+            let tile_indices = extract_tile_indices(&indices, w, tx, ty);
+            let packed = pack_nibbles(&tile_indices);
+            let compressed = zlib_compress(&packed)?;
+            let len = compressed.len() as u16;
+            data_payload.extend_from_slice(&len.to_le_bytes());
+            data_payload.push(0u8); // flags
+            data_payload.extend_from_slice(&compressed);
+        }
+    }
+    write_chunk(out, CHUNK_DATA, &data_payload);
+    Ok(())
+}
+
+/// Encode RGBA mode: paper color (3 bytes) + raw RGBA tiles
+fn encode_rgba(
+    out: &mut Vec<u8>,
+    image: &FmrlImage,
+    w: usize,
+    h: usize,
+    tiles_x: usize,
+    tiles_y: usize,
+) -> Result<(), FmrlError> {
+    // DATA chunk: paper color RGB (3 bytes) + tiles
+    let mut data_payload: Vec<u8> = Vec::new();
+    // Store paper color for fade target
+    data_payload.extend_from_slice(&image.palette.0[1]);
+
+    // Per-tile: [u16 compressed_len LE][u8 flags][compressed RGBA data]
+    for ty in 0..tiles_y {
+        for tx in 0..tiles_x {
+            let tile_rgba = extract_tile_rgba(&image.pixels, w, h, tx, ty);
+            let compressed = zlib_compress(&tile_rgba)?;
+            let len = compressed.len() as u16;
+            data_payload.extend_from_slice(&len.to_le_bytes());
+            data_payload.push(0u8); // flags
+            data_payload.extend_from_slice(&compressed);
+        }
+    }
+    write_chunk(out, CHUNK_DATA, &data_payload);
+    Ok(())
+}
+
+fn extract_tile_rgba(pixels: &[u8], width: usize, _height: usize, tx: usize, ty: usize) -> Vec<u8> {
+    let mut tile = Vec::with_capacity(TILE_SIZE * TILE_SIZE * 4);
+    let x_start = tx * TILE_SIZE;
+    let y_start = ty * TILE_SIZE;
+    for y in y_start..y_start + TILE_SIZE {
+        let row_start = (y * width + x_start) * 4;
+        tile.extend_from_slice(&pixels[row_start..row_start + TILE_SIZE * 4]);
+    }
+    tile
 }
 
 fn extract_tile_indices(indices: &[u8], width: usize, tx: usize, ty: usize) -> Vec<u8> {
