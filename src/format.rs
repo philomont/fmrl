@@ -164,11 +164,12 @@ pub struct Palette(pub [[u8; 3]; 4]);
 
 impl Default for Palette {
     fn default() -> Self {
+        // Default matches themes.default in fmrl.toml
         Palette([
-            [0, 0, 0],         // 0: ink (black)
-            [230, 220, 195],   // 1: aged paper
-            [180, 30, 30],     // 2: accent
-            [255, 255, 255],   // 3: white
+            [34, 34, 34],       // 0: ink
+            [250, 243, 225],   // 1: paper
+            [255, 109, 31],    // 2: accent (orange)
+            [245, 231, 198],   // 3: highlight
         ])
     }
 }

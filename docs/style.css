@@ -8,17 +8,17 @@
 
 :root {
   /* ── Default (Aged Parchment) ───────────────────────── */
-  --bg:        #12100d;
-  --surface:   #1c1912;
-  --border:    #2c2820;
-  --text:      #c6ba9a;
-  --text-dim:  #6e6650;
-  --bright:    #ece3c4;
-  --paper:     #e6dcc3;
-  --ink:       #1a1612;
-  --accent:    #b41e1e;
-  --accent-hi: #d03030;
-  --highlight:     #f5f0e6;
+  --bg:        #222222;
+  --surface:   #2a2a2a;
+  --border:    #333333;
+  --text:      #f5f3e3;
+  --text-dim:  #888888;
+  --bright:    #faf3e1;
+  --paper:     #faf3e1;
+  --ink:       #222222;
+  --accent:    #ff6d1f;
+  --accent-hi: #ff8c42;
+  --highlight:     #f5e7c6;
   --mono:      'Courier New', Courier, monospace;
   --sans:      system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
   --bar-h:     42px;
@@ -27,62 +27,62 @@
 
 /* ── Retro (80s Terminal) ─────────────────────────────── */
 [data-theme="retro"] {
-  --bg:        #0d1117;
-  --surface:   #161b22;
-  --border:    #30363d;
+  --bg:        #10385c;
+  --surface:   #163d60;
+  --border:    #1d4568;
   --text:      #7ee787;
   --text-dim:  #3fb950;
-  --bright:    #aff5b4;
-  --paper:     #0d1117;
-  --ink:       #7ee787;
-  --accent:    #ff7b72;
-  --accent-hi: #ff9a8a;
-  --highlight:     #e6edf3;
+  --bright:    #f4f6ff;
+  --paper:     #f4f6ff;
+  --ink:       #10385c;
+  --accent:    #eb8317;
+  --accent-hi: #f5a623;
+  --highlight:     #f3c623;
 }
 
-/* ── Vintage (Sepia Photograph) ───────────────────────── */
+/* ── Vintage (Spring Pastels) ───────────────────────── */
 [data-theme="vintage"] {
-  --bg:        #3d3229;
-  --surface:   #4a3f35;
-  --border:    #5c4f43;
-  --text:      #d4c4b0;
+  --bg:        #89986d;
+  --surface:   #8f9e73;
+  --border:    #95a479;
+  --text:      #f6f0d7;
   --text-dim:  #a89482;
-  --bright:    #f5e6d3;
-  --paper:     #d4c4b0;
-  --ink:       #3d3229;
-  --accent:    #8b0000;
-  --accent-hi: #a52a2a;
-  --highlight:     #faf0e6;
+  --bright:    #f6f0d7;
+  --paper:     #f6f0d7;
+  --ink:       #89986d;
+  --accent:    #9cab84;
+  --accent-hi: #a5b48b;
+  --highlight:     #c5d89d;
 }
 
 /* ── Neon (Cyberpunk) ────────────────────────────────── */
 [data-theme="neon"] {
-  --bg:        #0a0a0f;
-  --surface:   #12121a;
-  --border:    #1e1e2e;
-  --text:      #cdd6f4;
-  --text-dim:  #6c7086;
+  --bg:        #362f4f;
+  --surface:   #3d3656;
+  --border:    #443d5d;
+  --text:      #e4ff30;
+  --text-dim:  #cdd6f4;
   --bright:    #ffffff;
-  --paper:     #1e1e2e;
-  --ink:       #89b4fa;
-  --accent:    #ff006e;
-  --accent-hi: #ff3385;
-  --highlight:     #f8f8f2;
+  --paper:     #362f4f;
+  --ink:       #e4ff30;
+  --accent:    #008bff;
+  --accent-hi: #4da8ff;
+  --highlight:     #5b23ff;
 }
 
 /* ── Zen (Minimal Light) ──────────────────────────────── */
 [data-theme="zen"] {
-  --bg:        #f5f5f5;
-  --surface:   #ffffff;
+  --bg:        #cfcfcf;
+  --surface:   #d9d9d9;
   --border:    #e0e0e0;
   --text:      #333333;
   --text-dim:  #666666;
   --bright:    #000000;
-  --paper:     #ffffff;
-  --ink:       #212121;
-  --accent:    #e91e63;
-  --accent-hi: #ec407a;
-  --highlight:     #fafafa;
+  --paper:     #cfcfcf;
+  --ink:       #7f7f7f;
+  --accent:    #7f967f;
+  --accent-hi: #8fa88f;
+  --highlight:     #967f7f;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

@@ -15,11 +15,12 @@ function computeCanvasDims(srcW, srcH) {
 }
 
 // Default palette: ink, paper, accent, highlight
+// Matches themes.default in fmrl.toml
 const PALETTE = [
-    [  0,   0,   0],      // 0: ink (black)
-    [230, 220, 195],      // 1: paper
-    [180,  30,  30],      // 2: accent (red)
-    [255, 255, 255],      // 3: highlight (white)
+    [34, 34, 34],       // 0: ink
+    [250, 243, 225],   // 1: paper
+    [255, 109, 31],    // 2: accent (orange)
+    [245, 231, 198],   // 3: highlight
 ];
 
 // Theme palette definitions loaded from themes.json (synced from fmrl.toml)
@@ -661,8 +662,8 @@ function loadFmrl(arrayBuffer) {
         canvas.height = H;
         textHelper = null;
 
+        // Decode without additional aging (file already contains aged data)
         indices  = new Uint8Array(decode_to_indices(bytes));
-        indices  = _doAgeStep(indices, true);
         render();
         lastMetricSize = 0;
         blankSize = 0;
