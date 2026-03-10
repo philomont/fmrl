@@ -49,46 +49,50 @@ impl FmrlImage {
     }
 }
 
-/// Quantize an RGBA pixel to a palette index based on alpha semantics.
+/// Quantize an RGBA pixel to a palette index using semantic color analysis.
 ///
 /// The palette indices represent semantic meanings that map to theme colors:
-/// 0 = ink (full black/opacity) → renders as theme --ink
-/// 1 = paper (transparent) → renders as theme --paper
-/// 2 = accent (black 50% alpha) → renders as theme --accent
-/// 3 = highlight (white 50% alpha) → renders as theme --highlight
-fn quantize_pixel(r: u8, g: u8, b: u8, a: u8, _palette: &Palette) -> u8 {
-    // First check alpha - transparent pixels are paper
-    if a < 64 {
-        return 1; // paper (transparent)
+/// 0 = ink (dark) → renders as theme --ink
+/// 1 = paper (light/background) → renders as theme --paper
+/// 2 = accent (colorful/bright) → renders as theme --accent
+/// 3 = highlight (midtone) → renders as theme --highlight
+fn quantize_pixel(r: u8, g: u8, b: u8, a: u8) -> u8 {
+    // Transparent pixels are paper
+    if a < 128 {
+        return 1;
     }
 
-    // Calculate brightness
+    // Calculate color properties
     let brightness = (r as u16 + g as u16 + b as u16) / 3;
-    let is_dark = brightness < 128;
-    let is_light = brightness > 200;
-
-    // Check alpha level for opacity
-    let is_mostly_opaque = a >= 200;
-    let is_semi_transparent = a >= 64 && a < 200;
-
-    if is_mostly_opaque {
-        // Full opacity = ink (for dark) or paper (for light)
-        if is_dark {
-            0 // ink - full black
-        } else {
-            1 // paper - treat light opaque as paper background
-        }
-    } else if is_semi_transparent {
-        // Semi-transparent = accent (for dark) or highlight (for light)
-        if is_light {
-            3 // highlight - white 50%
-        } else {
-            2 // accent - black 50%
-        }
+    let max = r.max(g).max(b) as u16;
+    let min = r.min(g).min(b) as u16;
+    let saturation = if max > 0 {
+        ((max - min) * 255) / max
     } else {
-        // Fallback: dark = ink, light = paper
-        if is_dark { 0 } else { 1 }
+        0
+    };
+
+    // Color difference from orange (accent signature: high red, medium green, low blue)
+    let orange_dist = ((r as i32) - 255).abs() + ((g as i32) - 109).abs() + ((b as i32) - 31).abs();
+
+    // Ink: very dark, low saturation
+    if brightness < 80 && saturation < 100 {
+        return 0;
     }
+
+    // Paper: very light, low saturation
+    if brightness > 230 && saturation < 50 {
+        return 1;
+    }
+
+    // Accent: high saturation, or distinctly orange
+    if saturation > 120 || orange_dist < 150 {
+        return 2;
+    }
+
+    // Highlight: mid-brightness, moderate saturation
+    // Everything else falls here
+    3
 }
 
 /// Compress bytes with zlib (not raw DEFLATE).
@@ -184,7 +188,7 @@ fn encode_indexed(
             let g = image.pixels[base + 1];
             let b = image.pixels[base + 2];
             let a = image.pixels[base + 3];
-            indices[y * w + x] = quantize_pixel(r, g, b, a, &image.palette);
+            indices[y * w + x] = quantize_pixel(r, g, b, a);
         }
     }
 
