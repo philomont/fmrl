@@ -40,6 +40,9 @@ const STORAGE_TO_THEME = [
 let THEME_PALETTES = {};
 let customPalette = null; // For user-defined colors
 
+// Debug mode - enables PNG export alongside FMRL for inspection
+let debugMode = false;
+
 // Load themes from JSON file
 async function loadThemes() {
     try {
@@ -654,12 +657,57 @@ function _blitText(text) {
 
 function saveFmrl() {
     try {
-        // Encode current canvas state (aging happens during encoding protocol)
+        // Encode current canvas state (no aging during save)
         const bytes = encode_rgba(indicesToRgba(indices), W, H);
+
+        // Save FMRL file
         const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
         Object.assign(document.createElement('a'), { href: url, download: 'manuscript.fmrl' }).click();
         URL.revokeObjectURL(url);
+
+        // In debug mode, also save PNG for inspection
+        if (debugMode) {
+            saveDebugPng(bytes, W, H);
+        }
     } catch (e) { console.error('encode failed:', e); }
+}
+
+/// Save a debug PNG showing what was actually encoded
+function saveDebugPng(fmrlBytes, width, height) {
+    try {
+        // Decode the FMRL back to see what was actually stored
+        const decodedIndices = decode_to_indices(fmrlBytes);
+
+        // Create a canvas to render the decoded image
+        const debugCanvas = document.createElement('canvas');
+        debugCanvas.width = width;
+        debugCanvas.height = height;
+        const ctx = debugCanvas.getContext('2d');
+        const imgData = ctx.createImageData(width, height);
+
+        // Use theme palette to render the decoded indices
+        const palette = getThemePalette();
+        for (let i = 0; i < width * height; i++) {
+            const [r, g, b] = palette[decodedIndices[i]];
+            imgData.data[i * 4]     = r;
+            imgData.data[i * 4 + 1] = g;
+            imgData.data[i * 4 + 2] = b;
+            imgData.data[i * 4 + 3] = 255;
+        }
+        ctx.putImageData(imgData, 0, 0);
+
+        // Convert to PNG and download
+        debugCanvas.toBlob((blob) => {
+            const pngUrl = URL.createObjectURL(blob);
+            Object.assign(document.createElement('a'), {
+                href: pngUrl,
+                download: 'manuscript-debug.png'
+            }).click();
+            URL.revokeObjectURL(pngUrl);
+        }, 'image/png');
+    } catch (e) {
+        console.error('Debug PNG export failed:', e);
+    }
 }
 
 function loadFmrl(arrayBuffer) {
@@ -849,6 +897,20 @@ async function main() {
         reader.readAsArrayBuffer(file);
         e.target.value = '';
     });
+
+    // ── Debug mode ───────────────────────────────────────────────────────────
+    const debugCheckbox = document.getElementById('debug-mode');
+    if (debugCheckbox) {
+        // Load saved preference
+        debugMode = localStorage.getItem('fmrl-debug-mode') === 'true';
+        debugCheckbox.checked = debugMode;
+
+        debugCheckbox.addEventListener('change', e => {
+            debugMode = e.target.checked;
+            localStorage.setItem('fmrl-debug-mode', debugMode);
+            console.log('Debug mode:', debugMode ? 'enabled' : 'disabled');
+        });
+    }
 
     // ── Theme ───────────────────────────────────────────────────────────────
     initTheme();

@@ -111,17 +111,26 @@
           <strong>Auto aging</strong> uses a lighter erosion step (no short-run
           elimination) so high-rate aging feels fluid rather than abrupt. The
           <code>.fmrl</code> format stores images as a 4-color indexed palette
-          (ink, paper, accent, white) in 32×32 tiles, each zlib-compressed. The
+          (ink, paper, accent, highlight) in 32×32 tiles, each zlib-compressed. The
           <code>AGE</code> chunk carries per-tile timestamps and erosion counters
           rewritten with every render.
         </p>
         <p>
-          Saving bakes in 10 erosion steps. Opening applies one more — images are
-          noticeably older each time the file changes hands.
+          Use the <strong>Age</strong> buttons to manually age the image.
+          Passive auto-aging can be enabled to age the canvas while you work.
         </p>
         <div class="links">
           <a href="https://github.com/philomont/fmrl" class="btn-link">Source on GitHub</a>
         </div>
+
+        <h2>Debug Mode</h2>
+        <p style="font-size: 0.8rem; color: var(--text-dim);">
+          Enable to save PNG alongside FMRL for inspection.
+        </p>
+        <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; font-size: 0.85rem; cursor: pointer;">
+          <input type="checkbox" id="debug-mode" />
+          <span>Save PNG debug output</span>
+        </label>
       </section>
     </div>
   </aside>
