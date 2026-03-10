@@ -50,50 +50,36 @@ impl FmrlImage {
     }
 }
 
-/// Quantize an RGBA pixel to a palette index using semantic color analysis.
+/// Quantize an RGBA pixel to a palette index using alpha + grayscale mapping.
 ///
-/// The palette indices represent semantic meanings that map to theme colors:
-/// 0 = ink (dark) → renders as theme --ink
-/// 1 = paper (light/background) → renders as theme --paper
-/// 2 = accent (colorful/bright) → renders as theme --accent
-/// 3 = highlight (midtone) → renders as theme --highlight
+/// Storage format (theme-agnostic):
+/// 0 = ink (black [0,0,0], alpha=255) → renders as theme --ink
+/// 1 = paper (transparent, alpha=0) → renders as theme --paper
+/// 2 = accent (white [255,255,255], alpha=255) → renders as theme --accent
+/// 3 = highlight (gray [128,128,128], alpha=255) → renders as theme --highlight
+///
+/// Alpha is checked first to distinguish paper (transparent) from accent (white).
 fn quantize_pixel(r: u8, g: u8, b: u8, a: u8) -> u8 {
-    // Transparent pixels are paper
+    // Transparent pixels are paper (index 1)
+    // This distinguishes paper (alpha=0) from accent (white, alpha=255)
     if a < 128 {
         return 1;
     }
 
-    // Calculate color properties
+    // For opaque pixels, use brightness for grayscale mapping
     let brightness = (r as u16 + g as u16 + b as u16) / 3;
-    let max = r.max(g).max(b) as u16;
-    let min = r.min(g).min(b) as u16;
-    let saturation = if max > 0 {
-        ((max - min) * 255) / max
+
+    // Direct mapping based on brightness thresholds:
+    // 0-63   → ink (black)
+    // 64-191 → highlight (gray)
+    // 192+   → accent (white)
+    if brightness < 64 {
+        0 // ink - black
+    } else if brightness > 191 {
+        2 // accent - white
     } else {
-        0
-    };
-
-    // Color difference from orange (accent signature: high red, medium green, low blue)
-    let orange_dist = ((r as i32) - 255).abs() + ((g as i32) - 109).abs() + ((b as i32) - 31).abs();
-
-    // Ink: very dark, low saturation
-    if brightness < 80 && saturation < 100 {
-        return 0;
+        3 // highlight - gray
     }
-
-    // Paper: very light, low saturation
-    if brightness > 230 && saturation < 50 {
-        return 1;
-    }
-
-    // Accent: high saturation, or distinctly orange
-    if saturation > 120 || orange_dist < 150 {
-        return 2;
-    }
-
-    // Highlight: mid-brightness, moderate saturation
-    // Everything else falls here
-    3
 }
 
 /// Compress bytes with zlib (not raw DEFLATE).

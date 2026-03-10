@@ -122,7 +122,7 @@ pub fn decode_to_indices(data: &[u8]) -> Result<Vec<u8>, JsValue> {
         }
         ColorMode::Rgba => {
             // Quantize RGBA back to indices for editor compatibility
-            let palette = &decoded.palette;
+            // Uses direct grayscale mapping, not palette lookup
             for tile in &decoded.tiles {
                 let tx = tile.tx as usize;
                 let ty = tile.ty as usize;
@@ -135,7 +135,8 @@ pub fn decode_to_indices(data: &[u8]) -> Result<Vec<u8>, JsValue> {
                         let r = tile_rgba[src_base];
                         let g = tile_rgba[src_base + 1];
                         let b = tile_rgba[src_base + 2];
-                        let idx = quantize_to_palette(r, g, b, palette);
+                        let a = tile_rgba[src_base + 3];
+                        let idx = quantize_to_palette(r, g, b, a);
                         indices[dst_y * w + dst_x + px] = idx;
                     }
                 }
@@ -198,21 +199,28 @@ pub fn decode_to_rgba(data: &[u8]) -> Result<Vec<u8>, JsValue> {
     Ok(rgba)
 }
 
-/// Quantize an RGB value to the nearest palette index
-fn quantize_to_palette(r: u8, g: u8, b: u8, palette: &Palette) -> u8 {
-    let mut best_idx = 0u8;
-    let mut best_dist = u32::MAX;
-    for (i, color) in palette.0.iter().enumerate() {
-        let dr = (r as i32) - (color[0] as i32);
-        let dg = (g as i32) - (color[1] as i32);
-        let db = (b as i32) - (color[2] as i32);
-        let dist = (dr * dr + dg * dg + db * db) as u32;
-        if dist < best_dist {
-            best_dist = dist;
-            best_idx = i as u8;
-        }
+/// Quantize an RGBA value to palette index using alpha + grayscale mapping.
+/// Matches the logic in encode.rs quantize_pixel.
+fn quantize_to_palette(r: u8, g: u8, b: u8, a: u8) -> u8 {
+    // Transparent pixels are paper (index 1)
+    if a < 128 {
+        return 1;
     }
-    best_idx
+
+    // Use brightness for grayscale mapping
+    let brightness = (r as u16 + g as u16 + b as u16) / 3;
+
+    // Direct mapping based on brightness thresholds:
+    // 0-63   → ink (black)
+    // 64-191 → highlight (gray)
+    // 192+   → accent (white)
+    if brightness < 64 {
+        0 // ink - black
+    } else if brightness > 191 {
+        2 // accent - white
+    } else {
+        3 // highlight - gray
+    }
 }
 
 /// Apply one aging step to flat palette indices and return the result.

@@ -164,14 +164,14 @@ pub struct Palette(pub [[u8; 3]; 4]);
 
 impl Default for Palette {
     fn default() -> Self {
-        // Storage palette - matches quantize_pixel() STORAGE_PALETTE:
-        // These are the reference colors used for quantization.
-        // Index 1 (paper) uses alpha transparency, not the RGB value.
+        // Grayscale storage palette for direct mapping:
+        // Each index has a unique grayscale value for deterministic quantization.
+        // Index 1 (paper) uses alpha=0 (transparent), so its RGB can be anything.
         Palette([
-            [0, 0, 0],         // 0: ink - full black
-            [250, 243, 225],   // 1: paper - light beige (transparent via alpha)
-            [255, 109, 31],    // 2: accent - orange
-            [128, 128, 128],   // 3: highlight - gray
+            [0, 0, 0],         // 0: ink - black
+            [255, 255, 255],   // 1: paper - white (transparent via alpha=0)
+            [255, 255, 255],   // 2: accent - full white (opaque)
+            [128, 128, 128],   // 3: highlight - 50% gray
         ])
     }
 }
