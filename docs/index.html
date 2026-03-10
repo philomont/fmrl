@@ -8,21 +8,24 @@
 </head>
 <body>
 
-  <canvas id="canvas"></canvas>
+  <canvas id="canvas" tabindex="0"></canvas>
   <div class="canvas-overlay" id="overlay"><span>Loading…</span></div>
 
   <!-- ── Floating drawing toolbar (left strip) ───────────────────────────── -->
   <div class="mini-toolbar" id="mini-toolbar">
-    <button class="swatch active" data-idx="0" title="Ink"    style="--c:#000000"></button>
-    <button class="swatch"        data-idx="2" title="Crimson" style="--c:#b41e1e"></button>
-    <button class="swatch"        data-idx="3" title="White"   style="--c:#ffffff"></button>
-    <button class="swatch eraser" data-idx="1" title="Eraser (paper)"></button>
+    <button class="swatch active" data-idx="0" title="Ink (palette index 0)"></button>
+    <button class="swatch"        data-idx="2" title="Accent (palette index 2)"></button>
+    <button class="swatch"        data-idx="3" title="Highlight (palette index 3)"></button>
+    <button class="swatch"        data-idx="1" title="Paper/Eraser (palette index 1)"></button>
     <div class="toolbar-sep"></div>
     <button class="brush-btn active" data-size="2"  title="Fine">·</button>
     <button class="brush-btn"        data-size="6"  title="Medium">●</button>
     <button class="brush-btn"        data-size="14" title="Thick">⬤</button>
     <div class="toolbar-sep"></div>
     <button id="tool-text" class="brush-btn" title="Text — size follows brush">T</button>
+    <button id="tool-colors" class="brush-btn" title="Color Editor">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></svg>
+    </button>
   </div>
 
   <!-- ── Action bar (bottom strip) ───────────────────────────────────────── -->
@@ -48,7 +51,28 @@
       <input type="file" id="file-input" accept=".fmrl" />
     </label>
     <div class="bar-sep"></div>
-    <button id="tray-toggle" class="bar-icon-btn" title="About FMRL">ℹ</button>
+    <select id="theme-select" class="bar-btn" title="Change theme">
+      <option value="default">Default</option>
+      <option value="retro">Retro</option>
+      <option value="vintage">Vintage</option>
+      <option value="neon">Neon</option>
+      <option value="zen">Zen</option>
+      <option value="custom" disabled hidden>Custom</option>
+    </select>
+
+    <!-- Color picker panel - positioned above action bar -->
+    <div id="color-picker-panel" class="color-picker-panel">
+      <div class="color-picker-row">
+        <label>Ink<input type="color" class="color-picker" data-idx="0" title="Drawing color"></label>
+        <label>Accent<input type="color" class="color-picker" data-idx="2" title="Age button color"></label>
+        <label>Highlight<input type="color" class="color-picker" data-idx="3" title="Bright accent"></label>
+        <label>Paper<input type="color" class="color-picker" data-idx="1" title="Background/eraser"></label>
+      </div>
+    </div>
+    <div class="bar-sep"></div>
+    <button id="tray-toggle" class="bar-icon-btn" title="About FMRL">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+    </button>
   </div>
 
   <!-- ── Tray backdrop ───────────────────────────────────────────────────── -->
@@ -87,7 +111,7 @@
           <strong>Auto aging</strong> uses a lighter erosion step (no short-run
           elimination) so high-rate aging feels fluid rather than abrupt. The
           <code>.fmrl</code> format stores images as a 4-color indexed palette
-          (ink, paper, crimson, white) in 32×32 tiles, each zlib-compressed. The
+          (ink, paper, accent, white) in 32×32 tiles, each zlib-compressed. The
           <code>AGE</code> chunk carries per-tile timestamps and erosion counters
           rewritten with every render.
         </p>
@@ -103,5 +127,6 @@
   </aside>
 
   <script type="module" src="index.js"></script>
+  <script src="test-accent-color.js"></script>
 </body>
 </html>

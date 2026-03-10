@@ -12,24 +12,52 @@ pub const CHUNK_ORIG: &[u8; 4] = b"ORIG";
 pub const CHUNK_META: &[u8; 4] = b"META";
 pub const CHUNK_IEND: &[u8; 4] = b"IEND";
 
+// Color types (PNG-compatible where applicable)
+pub const COLOR_TYPE_INDEXED: u8 = 3; // Palette-based, 4-color
+pub const COLOR_TYPE_RGBA: u8 = 6;    // Full RGBA (8-bit per channel)
+
 /// IHDR payload length: width(2) + height(2) + bit_depth(1) + color_type(1) +
 /// compression(1) + filter(1) + interlace(1) + decay_policy(1) = 10 bytes
 pub const IHDR_LEN: usize = 10;
 
 /// AGE entry: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) +
-/// edge_damage(1) + reserved(2) = 20 bytes... wait:
-/// tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) + edge_damage(1) + reserved(2) = 20
-/// Plan says 22 bytes. Let me count: tx(2)+ty(2)+last_view(8)+fade_level(1)+noise_seed(4)+edge_damage(1)+reserved(2) = 20
-/// Adding pad(2) to reach 22:
-/// tx(u16)=2, ty(u16)=2, last_view(u64)=8, fade_level(u8)=1, noise_seed([u8;4])=4, edge_damage(u8)=1, reserved(u16)=2, _pad(u16)=2 = 22
+/// edge_damage(1) + reserved(2) + _pad(2) = 22 bytes
 pub const AGE_ENTRY_BYTES: usize = 22;
+
+/// Color mode for FMRL images
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ColorMode {
+    /// 4-color indexed palette (classic FMRL)
+    Indexed,
+    /// Full 8-bit RGBA per pixel
+    Rgba,
+}
+
+impl ColorMode {
+    /// Convert to PNG-compatible color type value
+    pub fn as_u8(self) -> u8 {
+        match self {
+            ColorMode::Indexed => COLOR_TYPE_INDEXED,
+            ColorMode::Rgba => COLOR_TYPE_RGBA,
+        }
+    }
+
+    /// Parse from PNG-compatible color type value
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            COLOR_TYPE_INDEXED => Some(ColorMode::Indexed),
+            COLOR_TYPE_RGBA => Some(ColorMode::Rgba),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct IhdrChunk {
     pub width: u16,
     pub height: u16,
     pub bit_depth: u8,
-    pub color_type: u8,
+    pub color_mode: ColorMode,
     pub compression: u8,
     pub filter: u8,
     pub interlace: u8,
@@ -37,12 +65,12 @@ pub struct IhdrChunk {
 }
 
 impl IhdrChunk {
-    pub fn new(width: u16, height: u16, decay_policy: u8) -> Self {
+    pub fn new(width: u16, height: u16, color_mode: ColorMode, decay_policy: u8) -> Self {
         IhdrChunk {
             width,
             height,
             bit_depth: 8,
-            color_type: 3, // indexed color
+            color_mode,
             compression: 0,
             filter: 0,
             interlace: 0,
@@ -50,12 +78,17 @@ impl IhdrChunk {
         }
     }
 
+    /// Create with default indexed color mode (backward compatible)
+    pub fn new_indexed(width: u16, height: u16, decay_policy: u8) -> Self {
+        Self::new(width, height, ColorMode::Indexed, decay_policy)
+    }
+
     pub fn to_bytes(&self) -> [u8; IHDR_LEN] {
         let mut buf = [0u8; IHDR_LEN];
         buf[0..2].copy_from_slice(&self.width.to_be_bytes());
         buf[2..4].copy_from_slice(&self.height.to_be_bytes());
         buf[4] = self.bit_depth;
-        buf[5] = self.color_type;
+        buf[5] = self.color_mode.as_u8();
         buf[6] = self.compression;
         buf[7] = self.filter;
         buf[8] = self.interlace;
@@ -67,11 +100,13 @@ impl IhdrChunk {
         if b.len() < IHDR_LEN {
             return Err(FmrlError::MalformedChunk("IHDR too short"));
         }
+        let color_mode = ColorMode::from_u8(b[5])
+            .ok_or(FmrlError::MalformedChunk("unsupported color type"))?;
         Ok(IhdrChunk {
             width: u16::from_be_bytes([b[0], b[1]]),
             height: u16::from_be_bytes([b[2], b[3]]),
             bit_depth: b[4],
-            color_type: b[5],
+            color_mode,
             compression: b[6],
             filter: b[7],
             interlace: b[8],
@@ -132,7 +167,7 @@ impl Default for Palette {
         Palette([
             [0, 0, 0],         // 0: ink (black)
             [230, 220, 195],   // 1: aged paper
-            [180, 30, 30],     // 2: crimson accent
+            [180, 30, 30],     // 2: accent
             [255, 255, 255],   // 3: white
         ])
     }

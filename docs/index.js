@@ -14,13 +14,229 @@ function computeCanvasDims(srcW, srcH) {
     ];
 }
 
-// Default palette: ink, paper, crimson, white
+// Default palette: ink, paper, accent, highlight
 const PALETTE = [
-    [  0,   0,   0],
-    [230, 220, 195],
-    [180,  30,  30],
-    [255, 255, 255],
+    [  0,   0,   0],      // 0: ink (black)
+    [230, 220, 195],      // 1: paper
+    [180,  30,  30],      // 2: accent (red)
+    [255, 255, 255],      // 3: highlight (white)
 ];
+
+// Theme palette definitions loaded from themes.json (synced from fmrl.toml)
+let THEME_PALETTES = {};
+let customPalette = null; // For user-defined colors
+
+// Load themes from JSON file
+async function loadThemes() {
+    try {
+        const response = await fetch('themes.json');
+        if (!response.ok) throw new Error('Failed to load themes');
+        const themes = await response.json();
+
+        // Convert object format to array format [ink, paper, accent, highlight]
+        for (const [name, data] of Object.entries(themes)) {
+            THEME_PALETTES[name] = [
+                data.ink,
+                data.paper,
+                data.accent,
+                data.highlight,
+            ];
+        }
+        console.log('Loaded themes:', Object.keys(THEME_PALETTES));
+    } catch (e) {
+        console.warn('Failed to load themes.json, using defaults:', e);
+        // Fallback to default palette
+        THEME_PALETTES = { default: PALETTE };
+    }
+}
+
+function getThemePalette() {
+    // Return custom palette if set
+    if (customPalette) return customPalette;
+
+    // Get current theme name
+    const currentTheme = document.documentElement.getAttribute('data-theme') || 'default';
+
+    // Return palette from theme definition (avoids CSS timing issues)
+    if (THEME_PALETTES[currentTheme]) {
+        return THEME_PALETTES[currentTheme];
+    }
+
+    // Fallback to reading from CSS (shouldn't happen for presets)
+    const root = getComputedStyle(document.documentElement);
+    const ink = cssColorToRgb(root.getPropertyValue('--ink').trim());
+    const paper = cssColorToRgb(root.getPropertyValue('--paper').trim());
+    const accent = cssColorToRgb(root.getPropertyValue('--accent').trim());
+    const highlight = cssColorToRgb(root.getPropertyValue('--highlight').trim());
+    return [ink, paper, accent, highlight];
+}
+
+function cssColorToRgb(color) {
+    if (!color) return [0, 0, 0];
+    // Handle hex colors
+    if (color.startsWith('#')) {
+        const hex = color.slice(1);
+        if (hex.length === 3) {
+            return [
+                parseInt(hex[0] + hex[0], 16),
+                parseInt(hex[1] + hex[1], 16),
+                parseInt(hex[2] + hex[2], 16)
+            ];
+        }
+        return [
+            parseInt(hex.slice(0, 2), 16),
+            parseInt(hex.slice(2, 4), 16),
+            parseInt(hex.slice(4, 6), 16)
+        ];
+    }
+    // Handle rgb(r, g, b) format
+    const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    if (match) {
+        return [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])];
+    }
+    // Fallback to default palette
+    return PALETTE;
+}
+
+function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+function updateSwatchColors() {
+    const palette = getThemePalette();
+
+    // palette: [ink, paper, accent, highlight]
+    const [ink, paper, accent, highlight] = palette;
+    const inkRgb = `rgb(${ink[0]}, ${ink[1]}, ${ink[2]})`;
+    const paperRgb = `rgb(${paper[0]}, ${paper[1]}, ${paper[2]})`;
+    const accentRgb = `rgb(${accent[0]}, ${accent[1]}, ${accent[2]})`;
+    const highlightRgb = `rgb(${highlight[0]}, ${highlight[1]}, ${highlight[2]})`;
+
+    // Set colors directly on swatch elements (inline styles override CSS)
+    const swatches = document.querySelectorAll('.swatch');
+    swatches.forEach(swatch => {
+        const idx = parseInt(swatch.dataset.idx, 10);
+        if (idx === 0) swatch.style.backgroundColor = inkRgb;
+        else if (idx === 1) swatch.style.backgroundColor = paperRgb;
+        else if (idx === 2) swatch.style.backgroundColor = accentRgb;
+        else if (idx === 3) swatch.style.backgroundColor = highlightRgb;
+    });
+
+    // Update color picker values if they exist
+    const pickers = document.querySelectorAll('.color-picker');
+    pickers.forEach((picker) => {
+        const idx = parseInt(picker.dataset.idx, 10);
+        if (palette[idx]) {
+            picker.value = rgbToHex(palette[idx][0], palette[idx][1], palette[idx][2]);
+        }
+    });
+
+    // Update accent colors for UI (Age buttons, etc.)
+    updateAccentColors(accent);
+
+    // Force a re-render of the canvas with new palette
+    render();
+}
+
+function updateAccentColors(accentColor) {
+    const root = document.documentElement;
+    const [r, g, b] = accentColor;
+    const hex = rgbToHex(r, g, b);
+
+    // Set accent to accent color with !important to override theme CSS
+    root.style.setProperty('--accent', hex, 'important');
+
+    // Calculate a lighter version for accent-hi (mix with white)
+    const lighten = (val, amount) => Math.min(255, Math.round(val + (255 - val) * amount));
+    const hiR = lighten(r, 0.3);
+    const hiG = lighten(g, 0.3);
+    const hiB = lighten(b, 0.3);
+    root.style.setProperty('--accent-hi', rgbToHex(hiR, hiG, hiB), 'important');
+}
+
+function setTheme(themeName) {
+    const customOption = document.querySelector('#theme-select option[value="custom"]');
+
+    if (themeName === 'custom') {
+        // Load custom colors from localStorage or use current theme as starting point
+        const saved = localStorage.getItem('fmrl-custom-palette');
+        if (saved) {
+            customPalette = JSON.parse(saved);
+        } else {
+            // Start from current theme colors, not default
+            customPalette = getThemePalette().map(c => [...c]);
+        }
+        document.documentElement.removeAttribute('data-theme');
+        // Ensure Custom option is visible
+        if (customOption) {
+            customOption.disabled = false;
+            customOption.hidden = false;
+        }
+    } else {
+        // Clear custom palette when selecting a preset
+        customPalette = null;
+        localStorage.removeItem('fmrl-custom-palette');
+        document.documentElement.setAttribute('data-theme', themeName);
+        // Hide Custom option when using presets
+        if (customOption) {
+            customOption.disabled = true;
+            customOption.hidden = true;
+        }
+    }
+    localStorage.setItem('fmrl-theme', themeName);
+    // Reset blank size on theme change since palette changed
+    blankSize = 0;
+    lastMetricSize = 0;
+    updateSwatchColors();
+    render();
+    updateMetric();
+}
+
+function setCustomColor(idx, hexColor) {
+    if (!customPalette) {
+        // Deep copy to avoid reference issues
+        customPalette = getThemePalette().map(c => [...c]);
+    }
+    customPalette[idx] = cssColorToRgb(hexColor);
+    localStorage.setItem('fmrl-custom-palette', JSON.stringify(customPalette));
+    // Switch to custom theme to ensure palette is used
+    document.documentElement.removeAttribute('data-theme');
+    localStorage.setItem('fmrl-theme', 'custom');
+    // Enable and select the Custom option
+    const customOption = document.querySelector('#theme-select option[value="custom"]');
+    if (customOption) {
+        customOption.disabled = false;
+        customOption.hidden = false;
+    }
+    document.getElementById('theme-select').value = 'custom';
+    // Reset blank size on theme change since palette changed
+    blankSize = 0;
+    lastMetricSize = 0;
+    updateSwatchColors();
+    render();
+    updateMetric();
+}
+
+function initTheme() {
+    const saved = localStorage.getItem('fmrl-theme') || 'default';
+    const customOption = document.querySelector('#theme-select option[value="custom"]');
+
+    // If there's a saved custom palette, enable the Custom option
+    const hasCustomPalette = localStorage.getItem('fmrl-custom-palette');
+    if (customOption) {
+        if (hasCustomPalette) {
+            customOption.disabled = false;
+            customOption.hidden = false;
+        } else if (saved !== 'custom') {
+            // Hide Custom if no saved palette and not currently custom
+            customOption.disabled = true;
+            customOption.hidden = true;
+        }
+    }
+
+    document.getElementById('theme-select').value = saved;
+    setTheme(saved);
+}
 
 // ── Drawing state ───────────────────────────────────────────────────────────
 
@@ -30,7 +246,50 @@ let brushSize = 2;   // matches first brush-btn data-size
 let drawing   = false;
 let lastX     = -1;
 let lastY     = -1;
-let lastSize  = 0;
+
+// Tool state memory for color editor
+let lastToolBeforeColorEdit = null;
+
+function rememberToolState() {
+    // Remember which tool was active
+    if (textMode) {
+        lastToolBeforeColorEdit = 'text';
+    } else {
+        const activeBrush = document.querySelector('.brush-btn[data-size].active');
+        if (activeBrush) {
+            lastToolBeforeColorEdit = activeBrush.dataset.size;
+        }
+    }
+}
+
+function restoreToolState() {
+    if (!lastToolBeforeColorEdit) {
+        // Default to fine brush if nothing was remembered
+        document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
+        const fine = document.querySelector('.brush-btn[data-size="2"]');
+        if (fine) fine.classList.add('active');
+        brushSize = 2;
+        return;
+    }
+
+    document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
+
+    if (lastToolBeforeColorEdit === 'text') {
+        setTextMode(true);
+        document.getElementById('tool-text').classList.add('active');
+    } else {
+        const brushBtn = document.querySelector(`.brush-btn[data-size="${lastToolBeforeColorEdit}"]`);
+        if (brushBtn) {
+            brushBtn.classList.add('active');
+            brushSize = parseInt(lastToolBeforeColorEdit, 10);
+        } else {
+            // Fallback to fine brush
+            const fine = document.querySelector('.brush-btn[data-size="2"]');
+            if (fine) fine.classList.add('active');
+            brushSize = 2;
+        }
+    }
+}
 
 // ── Rendering ───────────────────────────────────────────────────────────────
 
@@ -39,8 +298,9 @@ let canvas;
 function render() {
     const ctx     = canvas.getContext('2d');
     const imgData = ctx.createImageData(W, H);
+    const palette = getThemePalette();
     for (let i = 0; i < W * H; i++) {
-        const [r, g, b] = PALETTE[indices[i]];
+        const [r, g, b] = palette[indices[i]];
         imgData.data[i * 4]     = r;
         imgData.data[i * 4 + 1] = g;
         imgData.data[i * 4 + 2] = b;
@@ -141,6 +401,10 @@ function _doAgeStep(src, full = true) {
 function applyAge(n = 1) {
     for (let i = 0; i < n; i++) indices = _doAgeStep(indices, true);
     render();
+    // Compute blank size on first aging if not already done
+    if (blankSize === 0) {
+        computeBlankSize();
+    }
     updateMetric();
 }
 
@@ -148,24 +412,72 @@ function applyAge(n = 1) {
 
 function indicesToRgba(src = indices) {
     const rgba = new Uint8Array(W * H * 4);
+    const palette = getThemePalette();
     for (let i = 0; i < W * H; i++) {
-        const [r, g, b] = PALETTE[src[i]];
+        const [r, g, b] = palette[src[i]];
         rgba[i * 4] = r; rgba[i * 4 + 1] = g;
         rgba[i * 4 + 2] = b; rgba[i * 4 + 3] = 255;
     }
     return rgba;
 }
 
+// ── Size tracking ───────────────────────────────────────────────────────────
+
+let blankSize = 0;     // Size of all-paper canvas
+let lastMetricSize = 0; // For tracking change between updates
+
+function formatBytes(bytes) {
+    if (bytes >= 1048576) {
+        return (bytes / 1048576).toFixed(2) + ' MB';
+    } else if (bytes >= 1024) {
+        return (bytes / 1024).toFixed(2) + ' kB';
+    } else {
+        return bytes + ' B';
+    }
+}
+
+function computeBlankSize() {
+    // Create all-paper indices (paper is always index 1)
+    const paperIndices = new Uint8Array(W * H).fill(1);
+    // Use current palette for blank size calculation
+    const palette = getThemePalette();
+    const rgba = new Uint8Array(W * H * 4);
+    for (let i = 0; i < W * H; i++) {
+        const [r, g, b] = palette[1]; // paper color
+        rgba[i * 4] = r;
+        rgba[i * 4 + 1] = g;
+        rgba[i * 4 + 2] = b;
+        rgba[i * 4 + 3] = 255;
+    }
+    blankSize = encode_rgba(rgba, W, H).length;
+}
+
 function updateMetric() {
     const size = encode_rgba(indicesToRgba(), W, H).length;
-    const el   = document.getElementById('size-metric');
-    let text = `${size.toLocaleString()} B`;
-    if (lastSize > 0) {
-        const diff = size - lastSize;
-        if (diff !== 0) text += `  ${diff < 0 ? '↓' : '↑'}${Math.abs(diff).toLocaleString()}`;
+    const el = document.getElementById('size-metric');
+
+    // Format current size
+    let text = formatBytes(size);
+
+    // Only show metrics after first aging (when blankSize has been computed)
+    if (blankSize > 0) {
+        // Show difference from blank (information content)
+        const infoDiff = size - blankSize;
+        if (infoDiff !== 0) {
+            text += `  (${infoDiff > 0 ? '+' : ''}${formatBytes(infoDiff)} from blank)`;
+        }
+
+        // Show change from last update (aging effect)
+        if (lastMetricSize > 0) {
+            const change = size - lastMetricSize;
+            if (change !== 0) {
+                text += `  [${change < 0 ? '↓' : '↑'}${formatBytes(Math.abs(change))}]`;
+            }
+        }
     }
+
     el.textContent = text;
-    lastSize = size;
+    lastMetricSize = size;
 }
 
 // ── Auto (passive) aging ─────────────────────────────────────────────────────
@@ -298,7 +610,9 @@ function _blitText(text) {
     const fs  = textFontSize();
     ctx.clearRect(0, 0, W, H);
     ctx.font      = `${fs}px "National Park", serif`;
-    ctx.fillStyle = '#000000';
+    const palette = getThemePalette();
+    const [r, g, b] = palette[colorIdx];
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
     ctx.fillText(text, textCursor.x, textCursor.y);
 
     const m       = ctx.measureText(text);
@@ -351,7 +665,8 @@ function loadFmrl(arrayBuffer) {
         indices  = new Uint8Array(decode_to_indices(bytes));
         indices  = _doAgeStep(indices, true);
         render();
-        lastSize = 0;
+        lastMetricSize = 0;
+        blankSize = 0;
         updateMetric();
     } catch (e) { alert(`Failed to load .fmrl: ${e}`); }
 }
@@ -372,6 +687,9 @@ function closeTray() {
 async function main() {
     await init();
 
+    // Load themes from themes.json (synced from fmrl.toml)
+    await loadThemes();
+
     canvas = document.getElementById('canvas');
     [W, H] = computeCanvasDims(window.innerWidth, window.innerHeight);
     canvas.width  = W;
@@ -382,7 +700,12 @@ async function main() {
 
     document.getElementById('overlay').classList.add('hidden');
     render();
-    updateMetric();
+    // Don't compute blank size or show detailed metrics until first aging
+    blankSize = 0;
+    lastMetricSize = 0;
+    const el = document.getElementById('size-metric');
+    const size = encode_rgba(indicesToRgba(), W, H).length;
+    el.textContent = formatBytes(size);
 
     // ── Canvas events ───────────────────────────────────────────────────────
     canvas.addEventListener('mousedown', e => {
@@ -506,7 +829,7 @@ async function main() {
 
     document.getElementById('btn-clear').addEventListener('click', () => {
         setTextMode(false);
-        indices.fill(1); render(); lastSize = 0; updateMetric();
+        indices.fill(1); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
     });
     document.getElementById('btn-save').addEventListener('click', saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
@@ -515,6 +838,83 @@ async function main() {
         reader.onload = ev => loadFmrl(ev.target.result);
         reader.readAsArrayBuffer(file);
         e.target.value = '';
+    });
+
+    // ── Theme ───────────────────────────────────────────────────────────────
+    initTheme();
+    document.getElementById('theme-select').addEventListener('change', e => {
+        const theme = e.target.value;
+        setTheme(theme);
+    });
+
+    // ── Color Editor Tool ───────────────────────────────────────────────────
+    document.getElementById('tool-colors').addEventListener('click', (e) => {
+        e.stopPropagation(); // Prevent immediate close
+        const panel = document.getElementById('color-picker-panel');
+        const isVisible = panel.classList.contains('visible');
+        if (isVisible) {
+            panel.classList.remove('visible');
+            document.getElementById('tool-colors').classList.remove('active');
+            // Restore the previous tool if we remembered one
+            restoreToolState();
+            // Clear the remembered state
+            lastToolBeforeColorEdit = null;
+        } else {
+            // Remember current tool before switching to color editor
+            rememberToolState();
+            // Exit text mode if open
+            if (textMode) {
+                setTextMode(false);
+            }
+            // Deselect all brush buttons
+            document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
+            // Sync picker values
+            updateSwatchColors();
+            panel.classList.add('visible');
+            document.getElementById('tool-colors').classList.add('active');
+        }
+    });
+
+    // Close color picker panel when clicking outside
+    document.addEventListener('click', e => {
+        const panel = document.getElementById('color-picker-panel');
+        const colorBtn = document.getElementById('tool-colors');
+        if (panel.classList.contains('visible') &&
+            !panel.contains(e.target) &&
+            !colorBtn.contains(e.target)) {
+            panel.classList.remove('visible');
+            colorBtn.classList.remove('active');
+            // Restore the previous tool
+            restoreToolState();
+            // Clear the remembered state
+            lastToolBeforeColorEdit = null;
+        }
+    });
+
+    // Prevent panel clicks from closing the panel
+    document.getElementById('color-picker-panel').addEventListener('click', e => {
+        e.stopPropagation();
+    });
+
+    // Color picker event listeners
+    document.querySelectorAll('.color-picker').forEach(picker => {
+        picker.addEventListener('input', e => {
+            const idx = parseInt(e.target.dataset.idx, 10);
+            setCustomColor(idx, e.target.value);
+        });
+        picker.addEventListener('change', e => {
+            // Color selection complete - close panel and return focus
+            const panel = document.getElementById('color-picker-panel');
+            panel.classList.remove('visible');
+            document.getElementById('tool-colors').classList.remove('active');
+            // Ensure color picker loses focus
+            e.target.blur();
+            // Return focus to document body (not canvas, to avoid text cursor)
+            document.body.focus();
+            // Restore the previous tool and clear remembered state
+            restoreToolState();
+            lastToolBeforeColorEdit = null;
+        });
     });
 
     // ── Tray ─────────────────────────────────────────────────────────────────
