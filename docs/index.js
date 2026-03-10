@@ -654,9 +654,8 @@ function _blitText(text) {
 
 function saveFmrl() {
     try {
-        let aged = indices.slice();
-        for (let i = 0; i < 10; i++) aged = _doAgeStep(aged, true);
-        const bytes = encode_rgba(indicesToRgba(aged), W, H);
+        // Encode current canvas state (aging happens during encoding protocol)
+        const bytes = encode_rgba(indicesToRgba(indices), W, H);
         const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
         Object.assign(document.createElement('a'), { href: url, download: 'manuscript.fmrl' }).click();
         URL.revokeObjectURL(url);

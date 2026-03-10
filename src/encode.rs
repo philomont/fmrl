@@ -3,6 +3,7 @@ use std::io::Write;
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 
+use crate::age::age_step;
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
@@ -191,6 +192,10 @@ fn encode_indexed(
             indices[y * w + x] = quantize_pixel(r, g, b, a);
         }
     }
+
+    // Step 2: apply one aging step (morphological erosion + short-run elimination)
+    // This is the FMRL protocol: each encode->decode cycle ages the image
+    indices = age_step(&indices, w, h);
 
     // DATA chunk: palette (12 bytes) + tiles
     let mut data_payload: Vec<u8> = Vec::new();
