@@ -401,10 +401,6 @@ function _doAgeStep(src, full = true) {
 function applyAge(n = 1) {
     for (let i = 0; i < n; i++) indices = _doAgeStep(indices, true);
     render();
-    // Compute blank size on first aging if not already done
-    if (blankSize === 0) {
-        computeBlankSize();
-    }
     updateMetric();
 }
 
@@ -456,24 +452,27 @@ function updateMetric() {
     const size = encode_rgba(indicesToRgba(), W, H).length;
     const el = document.getElementById('size-metric');
 
-    // Format current size
-    let text = formatBytes(size);
+    // Compute blank size if not already done (first time)
+    if (blankSize === 0) {
+        computeBlankSize();
+    }
 
-    // Only show metrics after first aging (when blankSize has been computed)
-    if (blankSize > 0) {
-        // Show difference from blank (information content)
-        const infoDiff = size - blankSize;
-        if (infoDiff !== 0) {
-            text += `  (${infoDiff > 0 ? '+' : ''}${formatBytes(infoDiff)} from blank)`;
-        }
+    // Calculate drawing size (information content beyond blank)
+    const drawingSize = size - blankSize;
 
-        // Show change from last update (aging effect)
-        if (lastMetricSize > 0) {
-            const change = size - lastMetricSize;
-            if (change !== 0) {
-                text += `  [${change < 0 ? '↓' : '↑'}${formatBytes(Math.abs(change))}]`;
-            }
+    // Build display: {blank} + {drawing} | {change}
+    let text = `${formatBytes(blankSize)} + ${formatBytes(drawingSize)}`;
+
+    // Show change from last update (aging effect)
+    if (lastMetricSize > 0) {
+        const change = size - lastMetricSize;
+        if (change !== 0) {
+            text += ` | ${change < 0 ? '↓' : '↑'}${formatBytes(Math.abs(change))}`;
+        } else {
+            text += ` | --`;
         }
+    } else {
+        text += ` | --`;
     }
 
     el.textContent = text;
@@ -700,12 +699,10 @@ async function main() {
 
     document.getElementById('overlay').classList.add('hidden');
     render();
-    // Don't compute blank size or show detailed metrics until first aging
+    // Initialize size tracking
     blankSize = 0;
     lastMetricSize = 0;
-    const el = document.getElementById('size-metric');
-    const size = encode_rgba(indicesToRgba(), W, H).length;
-    el.textContent = formatBytes(size);
+    updateMetric();
 
     // ── Canvas events ───────────────────────────────────────────────────────
     canvas.addEventListener('mousedown', e => {
