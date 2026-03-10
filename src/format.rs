@@ -164,17 +164,14 @@ pub struct Palette(pub [[u8; 3]; 4]);
 
 impl Default for Palette {
     fn default() -> Self {
-        // Storage palette for semantic color encoding:
-        // These are the colors stored in the FMRL file that map to theme colors:
-        // 0: ink       = full black [0, 0, 0] → renders as theme --ink
-        // 1: paper     = transparent → stored as index 1, renders as theme --paper
-        // 2: accent    = white [255, 255, 255] → renders as theme --accent
-        // 3: highlight = 50% gray [128, 128, 128] → renders as theme --highlight
+        // Storage palette - matches quantize_pixel() STORAGE_PALETTE:
+        // These are the reference colors used for quantization.
+        // Index 1 (paper) uses alpha transparency, not the RGB value.
         Palette([
             [0, 0, 0],         // 0: ink - full black
-            [255, 255, 255],   // 1: paper - white (transparent by convention)
-            [255, 255, 255],   // 2: accent - white
-            [128, 128, 128],   // 3: highlight - 50% gray
+            [250, 243, 225],   // 1: paper - light beige (transparent via alpha)
+            [255, 109, 31],    // 2: accent - orange
+            [128, 128, 128],   // 3: highlight - gray
         ])
     }
 }
