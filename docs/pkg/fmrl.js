@@ -19,6 +19,14 @@ export class FmrlView {
         wasm.__wbg_fmrlview_free(ptr, 0);
     }
     /**
+     * Returns the age type: 0 = erosion, 1 = fade, 2 = noise
+     * @returns {number}
+     */
+    age_type() {
+        const ret = wasm.fmrlview_age_type(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * Average fade_level across all tiles (0–255).
      * @returns {number}
      */
@@ -189,6 +197,7 @@ export function decode_to_rgba(data) {
 /**
  * Encode raw RGBA pixels into a new .fmrl file using indexed mode (palette quantization).
  * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+ * Uses default age_type (erosion).
  * @param {Uint8Array} rgba
  * @param {number} width
  * @param {number} height
@@ -209,6 +218,7 @@ export function encode_rgba(rgba, width, height) {
 /**
  * Encode raw RGBA pixels into a new .fmrl file using full RGBA mode (no palette quantization).
  * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+ * Uses default age_type (erosion).
  * @param {Uint8Array} rgba
  * @param {number} width
  * @param {number} height
@@ -218,6 +228,48 @@ export function encode_rgba_full(rgba, width, height) {
     const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.encode_rgba_full(ptr0, len0, width, height);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Encode raw RGBA pixels in full RGBA mode with specified age type.
+ * `age_type`: 0 = erosion, 1 = fade, 2 = noise
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} age_type
+ * @returns {Uint8Array}
+ */
+export function encode_rgba_full_with_age(rgba, width, height, age_type) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.encode_rgba_full_with_age(ptr0, len0, width, height, age_type);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Encode raw RGBA pixels with specified age type.
+ * `age_type`: 0 = erosion, 1 = fade, 2 = noise
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} age_type
+ * @returns {Uint8Array}
+ */
+export function encode_rgba_with_age(rgba, width, height, age_type) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.encode_rgba_with_age(ptr0, len0, width, height, age_type);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }

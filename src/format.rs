@@ -17,9 +17,10 @@ pub const COLOR_TYPE_INDEXED: u8 = 3; // Palette-based, 4-color
 pub const COLOR_TYPE_RGBA: u8 = 6;    // Full RGBA (8-bit per channel)
 
 // Age types for different aging algorithms
-pub const AGE_TYPE_EROSION: u8 = 0;   // Morphological erosion (default)
-pub const AGE_TYPE_FADE: u8 = 1;      // Simple fade-to-paper
-pub const AGE_TYPE_NOISE: u8 = 2;     // Perlin noise degradation
+// All types must reduce information (file size decreases with each application)
+pub const AGE_TYPE_EROSION: u8 = 0;        // Morphological erosion (default)
+pub const AGE_TYPE_CONSOLIDATION: u8 = 1; // Neighbor consolidation: 32x32 → 16x16
+pub const AGE_TYPE_NOISE: u8 = 2;        // Perlin noise degradation (TODO)
 
 /// IHDR payload length: width(2) + height(2) + bit_depth(1) + color_type(1) +
 /// compression(1) + filter(1) + interlace(1) + decay_policy(1) + age_type(1) = 11 bytes
@@ -57,14 +58,16 @@ impl ColorMode {
     }
 }
 
-/// Age type for different aging algorithms
+/// Age type for different aging algorithms.
+/// All variants must be information-reducing (file size decreases with each application).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AgeType {
-    /// Morphological erosion - erodes edges of strokes
+    /// Morphological erosion - erodes edges of strokes (default)
     Erosion,
-    /// Simple fade to paper color
-    Fade,
-    /// Perlin noise-based degradation
+    /// Neighbor consolidation: 2x2 blocks merge to 1 pixel,
+    /// tile resolution reduces 32x32 → 16x16
+    Consolidation,
+    /// Perlin noise-based degradation (TODO)
     Noise,
 }
 
@@ -73,7 +76,7 @@ impl AgeType {
     pub fn as_u8(self) -> u8 {
         match self {
             AgeType::Erosion => AGE_TYPE_EROSION,
-            AgeType::Fade => AGE_TYPE_FADE,
+            AgeType::Consolidation => AGE_TYPE_CONSOLIDATION,
             AgeType::Noise => AGE_TYPE_NOISE,
         }
     }
@@ -82,7 +85,7 @@ impl AgeType {
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             AGE_TYPE_EROSION => Some(AgeType::Erosion),
-            AGE_TYPE_FADE => Some(AgeType::Fade),
+            AGE_TYPE_CONSOLIDATION => Some(AgeType::Consolidation),
             AGE_TYPE_NOISE => Some(AgeType::Noise),
             _ => None,
         }

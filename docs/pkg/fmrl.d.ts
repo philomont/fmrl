@@ -6,6 +6,10 @@ export class FmrlView {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Returns the age type: 0 = erosion, 1 = fade, 2 = noise
+     */
+    age_type(): number;
+    /**
      * Average fade_level across all tiles (0–255).
      */
     avg_fade_level(): number;
@@ -72,14 +76,28 @@ export function decode_to_rgba(data: Uint8Array): Uint8Array;
 /**
  * Encode raw RGBA pixels into a new .fmrl file using indexed mode (palette quantization).
  * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+ * Uses default age_type (erosion).
  */
 export function encode_rgba(rgba: Uint8Array, width: number, height: number): Uint8Array;
 
 /**
  * Encode raw RGBA pixels into a new .fmrl file using full RGBA mode (no palette quantization).
  * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+ * Uses default age_type (erosion).
  */
 export function encode_rgba_full(rgba: Uint8Array, width: number, height: number): Uint8Array;
+
+/**
+ * Encode raw RGBA pixels in full RGBA mode with specified age type.
+ * `age_type`: 0 = erosion, 1 = fade, 2 = noise
+ */
+export function encode_rgba_full_with_age(rgba: Uint8Array, width: number, height: number, age_type: number): Uint8Array;
+
+/**
+ * Encode raw RGBA pixels with specified age type.
+ * `age_type`: 0 = erosion, 1 = fade, 2 = noise
+ */
+export function encode_rgba_with_age(rgba: Uint8Array, width: number, height: number, age_type: number): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -92,6 +110,9 @@ export interface InitOutput {
     readonly decode_to_rgba: (a: number, b: number) => [number, number, number, number];
     readonly encode_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly encode_rgba_full: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly encode_rgba_full_with_age: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly encode_rgba_with_age: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly fmrlview_age_type: (a: number) => number;
     readonly fmrlview_avg_fade_level: (a: number) => number;
     readonly fmrlview_color_mode: (a: number) => number;
     readonly fmrlview_decode_and_decay: (a: number) => [number, number, number, number];

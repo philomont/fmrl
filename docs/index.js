@@ -1060,6 +1060,12 @@ async function main() {
         setTheme(theme);
     });
 
+    // ── Age Type ────────────────────────────────────────────────────────────
+    document.getElementById('age-type-select').addEventListener('change', e => {
+        currentAgeType = parseInt(e.target.value, 10);
+        console.log('Age type changed to:', currentAgeType === 0 ? 'Erosion' : 'Consolidation');
+    });
+
     // ── Color Editor Tool ───────────────────────────────────────────────────
     document.getElementById('tool-colors').addEventListener('click', (e) => {
         e.stopPropagation(); // Prevent immediate close
