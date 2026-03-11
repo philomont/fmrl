@@ -460,47 +460,141 @@ function _doAgeStep(src, full = true) {
     return next;
 }
 
+// Track consolidation level per tile (simulates AGE layer fade_level)
+let tileConsolidationLevels = null;
+
+// Initialize consolidation tracking for current canvas size
+function initConsolidationTracking() {
+    const tilesX = W / 32;
+    const tilesY = H / 32;
+    tileConsolidationLevels = new Uint8Array(tilesX * tilesY);
+}
+
 // _doConsolidationStep(src):
-//   Reduce effective resolution by 2×: each 2×2 block becomes 1 pixel
-//   with the most common index (lowest index wins ties).
-//   Result is upscaled back to original size by duplication.
+//   Progressive consolidation based on "age" (times consolidated).
+//   Block size increases with age: 2x2 → 4x4 → 8x8 → full tile (paper).
+//   Starts from tiles with content (non-paper), not from top-left.
 function _doConsolidationStep(src) {
     const w = W, h = H;
-    const halfW = w / 2;
-    const halfH = h / 2;
+    const tilesX = w / 32;
+    const tilesY = h / 32;
 
-    // Step 1: consolidate 2×2 blocks
-    const consolidated = new Uint8Array(halfW * halfH);
-    for (let by = 0; by < halfH; by++) {
-        for (let bx = 0; bx < halfW; bx++) {
-            const x0 = bx * 2;
-            const y0 = by * 2;
+    // Initialize tracking if needed
+    if (!tileConsolidationLevels || tileConsolidationLevels.length !== tilesX * tilesY) {
+        initConsolidationTracking();
+    }
 
-            const p0 = src[y0 * w + x0];
-            const p1 = src[y0 * w + (x0 + 1)];
-            const p2 = src[(y0 + 1) * w + x0];
-            const p3 = src[(y0 + 1) * w + (x0 + 1)];
-
-            consolidated[by * halfW + bx] = mostCommonIndex(p0, p1, p2, p3);
+    // First: identify tiles with content (non-paper pixels)
+    const tileHasContent = new Uint8Array(tilesX * tilesY);
+    for (let ty = 0; ty < tilesY; ty++) {
+        for (let tx = 0; tx < tilesX; tx++) {
+            const tx0 = tx * 32;
+            const ty0 = ty * 32;
+            let hasContent = false;
+            for (let y = 0; y < 32 && !hasContent; y++) {
+                for (let x = 0; x < 32; x++) {
+                    if (src[(ty0 + y) * w + (tx0 + x)] !== 0) {
+                        hasContent = true;
+                        break;
+                    }
+                }
+            }
+            tileHasContent[ty * tilesX + tx] = hasContent ? 1 : 0;
         }
     }
 
-    // Step 2: upscale back by 2× duplication
     const result = new Uint8Array(w * h);
-    for (let by = 0; by < halfH; by++) {
-        for (let bx = 0; bx < halfW; bx++) {
-            const c = consolidated[by * halfW + bx];
-            const x0 = bx * 2;
-            const y0 = by * 2;
 
-            result[y0 * w + x0] = c;
-            result[y0 * w + (x0 + 1)] = c;
-            result[(y0 + 1) * w + x0] = c;
-            result[(y0 + 1) * w + (x0 + 1)] = c;
+    // Process tiles: content tiles age first, empty tiles age slower
+    for (let ty = 0; ty < tilesY; ty++) {
+        for (let tx = 0; tx < tilesX; tx++) {
+            const tileIdx = ty * tilesX + tx;
+            const hasContent = tileHasContent[tileIdx] === 1;
+
+            // Empty tiles age at half speed (skip every other step)
+            if (!hasContent && tileConsolidationLevels[tileIdx] % 2 === 0) {
+                // Copy unchanged
+                const tx0 = tx * 32;
+                const ty0 = ty * 32;
+                for (let y = 0; y < 32; y++) {
+                    for (let x = 0; x < 32; x++) {
+                        result[(ty0 + y) * w + (tx0 + x)] = src[(ty0 + y) * w + (tx0 + x)];
+                    }
+                }
+                tileConsolidationLevels[tileIdx]++;
+                continue;
+            }
+
+            let age = tileConsolidationLevels[tileIdx];
+
+            // Determine block size based on age
+            let blockSize;
+            if (age >= 6) {
+                blockSize = 32; // Full tile -> paper
+            } else if (age >= 4) {
+                blockSize = 8;
+            } else if (age >= 2) {
+                blockSize = 4;
+            } else {
+                blockSize = 2;
+            }
+
+            const tx0 = tx * 32;
+            const ty0 = ty * 32;
+
+            if (blockSize === 32) {
+                // Full tile becomes paper (index 0)
+                for (let y = 0; y < 32; y++) {
+                    for (let x = 0; x < 32; x++) {
+                        result[(ty0 + y) * w + (tx0 + x)] = 0;
+                    }
+                }
+            } else {
+                // Consolidate at blockSize resolution
+                const blocksPerTile = 32 / blockSize;
+                for (let by = 0; by < blocksPerTile; by++) {
+                    for (let bx = 0; bx < blocksPerTile; bx++) {
+                        const pixels = [];
+                        const y0 = ty0 + by * blockSize;
+                        const x0 = tx0 + bx * blockSize;
+                        for (let y = 0; y < blockSize; y++) {
+                            for (let x = 0; x < blockSize; x++) {
+                                pixels.push(src[(y0 + y) * w + (x0 + x)]);
+                            }
+                        }
+                        const c = mostCommonIndexN(pixels);
+                        for (let y = 0; y < blockSize; y++) {
+                            for (let x = 0; x < blockSize; x++) {
+                                result[(y0 + y) * w + (x0 + x)] = c;
+                            }
+                        }
+                    }
+                }
+            }
+
+            tileConsolidationLevels[tileIdx] = Math.min(age + 1, 255);
         }
     }
 
     return result;
+}
+
+// Find most common index in N values. Lowest index wins ties.
+function mostCommonIndexN(pixels) {
+    const counts = new Uint16Array(16);
+    for (const p of pixels) {
+        counts[p]++;
+    }
+
+    let bestIdx = 0;
+    let bestCount = counts[0];
+    for (let i = 1; i < 16; i++) {
+        if (counts[i] > bestCount) {
+            bestCount = counts[i];
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
 }
 
 // Find most common index in 4 values. Lowest index wins ties.
@@ -523,8 +617,18 @@ function mostCommonIndex(a, b, c, d) {
 }
 
 function applyAge(n = 1) {
-    const doStep = currentAgeType === 1 ? _doConsolidationStep : _doAgeStep;
-    for (let i = 0; i < n; i++) indices = doStep(indices, true);
+    if (currentAgeType === 1) {
+        // Consolidation: progressive block sizes based on per-tile age
+        for (let i = 0; i < n; i++) {
+            indices = _doConsolidationStep(indices);
+        }
+    } else {
+        // Erosion: also reset consolidation tracking
+        tileConsolidationLevels = null;
+        for (let i = 0; i < n; i++) {
+            indices = _doAgeStep(indices, true);
+        }
+    }
     render();
     updateMetric();
 }
@@ -934,6 +1038,7 @@ function loadFmrl(arrayBuffer) {
         lastMetricSize = 0;
         blankSize = 0;
         updateMetric();
+        tileConsolidationLevels = null; // Reset consolidation tracking on load
     } catch (e) { alert(`Failed to load .fmrl: ${e}`); }
 }
 
@@ -1093,7 +1198,8 @@ async function main() {
 
     document.getElementById('btn-clear').addEventListener('click', () => {
         setTextMode(false);
-        indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();  // v0.4+: paper = index 0
+        indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
+        tileConsolidationLevels = null; // Reset consolidation tracking
     });
     document.getElementById('btn-save').addEventListener('click', saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
