@@ -77,6 +77,12 @@ impl FmrlView {
     pub fn age_type(&self) -> u8 {
         self.decoded.ihdr.age_type.as_u8()
     }
+
+    /// Returns the age levels (consolidation levels from fade_level) for all tiles.
+    /// Each entry is the consolidation level for that tile (0=initial, 1=2x2 done, etc.)
+    pub fn age_levels(&self) -> Vec<u8> {
+        self.decoded.age.iter().map(|a| a.fade_level).collect()
+    }
 }
 
 /// Encode raw RGBA pixels into a new .fmrl file using indexed mode (palette quantization).
@@ -88,12 +94,29 @@ pub fn encode_rgba(rgba: &[u8], width: u16, height: u16) -> Result<Vec<u8>, JsVa
 }
 
 /// Encode raw RGBA pixels with specified age type.
-/// `age_type`: 0 = erosion, 1 = fade, 2 = noise
+/// `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
 #[wasm_bindgen]
 pub fn encode_rgba_with_age(rgba: &[u8], width: u16, height: u16, age_type: u8) -> Result<Vec<u8>, JsValue> {
+    encode_rgba_with_age_and_levels(rgba, width, height, age_type, &[])
+}
+
+/// Encode raw RGBA pixels with age type and existing age levels.
+/// `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+/// `age_levels`: per-tile consolidation levels (empty = start fresh)
+#[wasm_bindgen]
+pub fn encode_rgba_with_age_and_levels(
+    rgba: &[u8],
+    width: u16,
+    height: u16,
+    age_type: u8,
+    age_levels: &[u8],
+) -> Result<Vec<u8>, JsValue> {
     let now = js_sys::Date::now() as u64;
     let mut image = FmrlImage::new(width, height, rgba.to_vec());
     image.age_type = AgeType::from_u8(age_type).unwrap_or(AgeType::Erosion);
+    if !age_levels.is_empty() {
+        image.age_levels = Some(age_levels.to_vec());
+    }
     encode(&image, now).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 

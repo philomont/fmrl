@@ -6,6 +6,11 @@ export class FmrlView {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Returns the age levels (consolidation levels from fade_level) for all tiles.
+     * Each entry is the consolidation level for that tile (0=initial, 1=2x2 done, etc.)
+     */
+    age_levels(): Uint8Array;
+    /**
      * Returns the age type: 0 = erosion, 1 = fade, 2 = noise
      */
     age_type(): number;
@@ -105,9 +110,16 @@ export function encode_rgba_full_with_age(rgba: Uint8Array, width: number, heigh
 
 /**
  * Encode raw RGBA pixels with specified age type.
- * `age_type`: 0 = erosion, 1 = fade, 2 = noise
+ * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
  */
 export function encode_rgba_with_age(rgba: Uint8Array, width: number, height: number, age_type: number): Uint8Array;
+
+/**
+ * Encode raw RGBA pixels with age type and existing age levels.
+ * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+ * `age_levels`: per-tile consolidation levels (empty = start fresh)
+ */
+export function encode_rgba_with_age_and_levels(rgba: Uint8Array, width: number, height: number, age_type: number, age_levels: Uint8Array): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -123,6 +135,8 @@ export interface InitOutput {
     readonly encode_rgba_full: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly encode_rgba_full_with_age: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly encode_rgba_with_age: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly encode_rgba_with_age_and_levels: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+    readonly fmrlview_age_levels: (a: number) => [number, number];
     readonly fmrlview_age_type: (a: number) => number;
     readonly fmrlview_avg_fade_level: (a: number) => number;
     readonly fmrlview_color_mode: (a: number) => number;

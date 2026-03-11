@@ -19,6 +19,17 @@ export class FmrlView {
         wasm.__wbg_fmrlview_free(ptr, 0);
     }
     /**
+     * Returns the age levels (consolidation levels from fade_level) for all tiles.
+     * Each entry is the consolidation level for that tile (0=initial, 1=2x2 done, etc.)
+     * @returns {Uint8Array}
+     */
+    age_levels() {
+        const ret = wasm.fmrlview_age_levels(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * Returns the age type: 0 = erosion, 1 = fade, 2 = noise
      * @returns {number}
      */
@@ -280,7 +291,7 @@ export function encode_rgba_full_with_age(rgba, width, height, age_type) {
 
 /**
  * Encode raw RGBA pixels with specified age type.
- * `age_type`: 0 = erosion, 1 = fade, 2 = noise
+ * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
  * @param {Uint8Array} rgba
  * @param {number} width
  * @param {number} height
@@ -297,6 +308,31 @@ export function encode_rgba_with_age(rgba, width, height, age_type) {
     var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v2;
+}
+
+/**
+ * Encode raw RGBA pixels with age type and existing age levels.
+ * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+ * `age_levels`: per-tile consolidation levels (empty = start fresh)
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} age_type
+ * @param {Uint8Array} age_levels
+ * @returns {Uint8Array}
+ */
+export function encode_rgba_with_age_and_levels(rgba, width, height, age_type, age_levels) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(age_levels, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.encode_rgba_with_age_and_levels(ptr0, len0, width, height, age_type, ptr1, len1);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
 }
 
 function __wbg_get_imports() {

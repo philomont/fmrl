@@ -1,7 +1,10 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, decode_to_indices } from './pkg/fmrl.js';
+import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices } from './pkg/fmrl.js';
 
 // Age type: 0 = erosion (default), 1 = consolidation
 let currentAgeType = 0;
+
+// Track age levels (consolidation levels) per tile - persists through encode/decode
+let currentAgeLevels = null;
 
 // ── Canvas dimensions ───────────────────────────────────────────────────────
 
@@ -463,18 +466,32 @@ function _doAgeStep(src, full = true) {
 function applyAge(n = 1) {
     try {
         // Age by encoding then decoding - aging happens during encode
-        const rgba = indicesToGrayscaleRgba(indices);
+        // Age levels persist through the cycle
+        let rgba = indicesToGrayscaleRgba(indices);
 
         for (let i = 0; i < n; i++) {
-            // Encode with current age type (applies one aging step)
-            const bytes = encode_rgba_with_age(rgba, W, H, currentAgeType);
+            // Encode with current age type and existing age levels
+            const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
+            const bytes = encode_rgba_with_age_and_levels(rgba, W, H, currentAgeType, ageLevelsArray);
+
+            // Read age levels back from the encoded file
+            const view = FmrlView.new(bytes);
+            currentAgeLevels = view.age_levels();
+            view.free();
+
             // Decode back to indices (display only)
             const newIndices = decode_to_indices(bytes);
+
             // Update rgba for next iteration
+            rgba = new Uint8Array(newIndices.length * 4);
             for (let j = 0; j < newIndices.length; j++) {
-                rgba[j * 4] = rgba[j * 4 + 1] = rgba[j * 4 + 2] = indexToBrightness(newIndices[j]);
+                const b = indexToBrightness(newIndices[j]);
+                rgba[j * 4] = b;
+                rgba[j * 4 + 1] = b;
+                rgba[j * 4 + 2] = b;
                 rgba[j * 4 + 3] = 255;
             }
+
             // Use new indices for next iteration
             indices = new Uint8Array(newIndices);
         }
@@ -881,6 +898,17 @@ function loadFmrl(arrayBuffer) {
         const bytes = new Uint8Array(arrayBuffer);
         const peek  = FmrlView.new(bytes);
         const fileW = peek.width(), fileH = peek.height();
+
+        // Read age levels and age type from the file
+        currentAgeLevels = peek.age_levels();
+        currentAgeType = peek.age_type();
+
+        // Update the UI to match the file's age type
+        const ageSelect = document.getElementById('age-type-select');
+        if (ageSelect) {
+            ageSelect.value = currentAgeType.toString();
+        }
+
         peek.free();
 
         [W, H] = [fileW, fileH];
@@ -1054,6 +1082,7 @@ async function main() {
     document.getElementById('btn-clear').addEventListener('click', () => {
         setTextMode(false);
         indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
+        currentAgeLevels = null; // Reset age levels on clear
     });
     document.getElementById('btn-save').addEventListener('click', saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
