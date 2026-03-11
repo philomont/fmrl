@@ -40,16 +40,21 @@ python -m http.server 3000 --directory wasm/
 
 | Chunk | Contents |
 |-------|----------|
-| `IHDR` | Width, height, color mode, decay policy |
-| `DATA` | Indexed: palette (12B) + packed indices; RGBA: paper color (3B) + raw RGBA tiles |
-| `AGE`  | Per-tile decay metadata: `last_view`, `fade_level`, `noise_seed`, `edge_damage` |
+| `IHDR` | Width, height, color mode, decay policy, **age_type** (11 bytes) |
+| `DATA` | Indexed: palette (48B) + tile data; RGBA: paper color (3B) + raw RGBA tiles |
+| `AGE`  | Per-tile metadata: `last_view`, `fade_level` (consolidation level), `noise_seed`, `edge_damage` |
 | `ORIG` | Optional: original strokes for reconstruction |
 | `META` | Optional: JSON metadata (`author`, `tags`, `decay_rate`) |
 | `IEND` | Terminator |
 
 **Color Types**:
-- `3` = Indexed (4-color palette)
+- `3` = Indexed (16-color palette)
 - `6` = RGBA (full 8-bit per channel)
+
+**Age Types** (stored in IHDR byte 10):
+- `0` = Erosion (morphological erosion)
+- `1` = Consolidation (progressive block merging)
+- `2` = Noise (Perlin degradation — reserved)
 
 ### Encoding Pipeline
 
@@ -61,42 +66,66 @@ Raw Pixels
   → .fmrl binary (chunked)
 ```
 
-### Decay/Decode Pipeline
+### Aging Architecture (v0.4.0+)
+
+**All aging happens during encoding**. The codec applies aging algorithms as part of the save process. The workflow is:
 
 ```
-.fmrl file
-  → Decompress tiles
-  → Compute decay factor: min(1.0, age_days / 30)
-  → Apply degradation in order: text erosion → line thinning → background fade
-     • Desaturation (color fading)
-     • Perlin-based noise injection (reproducible via per-tile PRNG seed)
-     • Edge erosion (salt-and-pepper noise on strokes)
-  → RGBA pixel output
+Canvas State (RGBA)
+  → Encode (apply aging algorithm)
+    → Quantize to palette indices
+    → Apply age_step (erosion) or consolidation_step (block merging)
+    → Update AGE chunk metadata
+    → Compress tiles
+  → Save .fmrl file
+  → Decode (display only, no aging)
+    → Decompress tiles
+    → Map indices to theme colors
+  → Render to canvas
 ```
+
+**To age the canvas**: The web app/tool re-encodes the current state. Each save cycle applies one aging step based on the file's `age_type`:
+- **Erosion** (`age_type=0`): Morphological erosion + short-run elimination
+- **Consolidation** (`age_type=1`): Progressive block merging (2×2 → 4×4 → 8×8 → ...)
+
+The AGE chunk stores per-tile consolidation levels in `fade_level`, allowing progressive degradation across save/load cycles.
 
 ### Decay Model
 
-- **Temporal decay**: Age since creation (stored as epoch ms in `AGE` chunk)
-- **Usage-based decay**: Per-tile `last_view` timestamps track access
-- **Deterministic degradation**: PRNG seeds stored per tile — identical file + same state → identical render across all platforms
-- **Decay is persistent**: `last_view` must be updated in the file or synced externally (local DB or cloud)
+- **Aging at encode time**: All degradation happens during `encode()`, not during display
+- **Per-tile age tracking**: `AGE.fade_level` stores consolidation level (0=initial, 1=2×2 done, 2=4×4 done, etc.)
+- **Content-first aging**: Tiles with non-paper content are prioritized for aging
+- **Deterministic degradation**: Same input + same age levels → identical output
+- **Information reduction**: Each aging step reduces file size by creating larger uniform areas
+
+### Web App / Tool Role
+
+The web demo (`docs/index.html`, `docs/index.js`) is a **display tool only**:
+- Drawing operations modify the canvas directly
+- **Age button**: Triggers save → load cycle (encode → decode → display)
+- **Save button**: Encodes with current age_type, downloads `.fmrl` file
+- **Load button**: Decodes file, displays on canvas (no aging applied)
+
+Aging algorithms live in Rust (`src/age.rs`):
+- `age_step()` — erosion-based aging
+- `consolidation_step_with_age()` — progressive block consolidation
 
 ### Source Layout
 
 ```
 src/
-  lib.rs      # Core encoder/decoder + decay engine + public API
-  format.rs   # File format definitions: ColorMode, Palette, IHDR, chunks, CRC
-  encode.rs   # Encoding: indexed and RGBA modes, quantization, zlib compression
+  lib.rs      # Core encoder/decoder + public API
+  format.rs   # File format definitions: ColorMode, Palette, IHDR, AgeType, chunks, CRC
+  encode.rs   # Encoding: indexed/RGBA modes, quantization, aging algorithms
   decode.rs   # Decoding: TileData with indices() and rgba() accessors
-  decay.rs    # Rendering: temporal decay, edge erosion, fade-to-paper
-  age.rs      # Morphological aging algorithm (indices-based)
+  age.rs      # Aging algorithms: erosion_step, consolidation_step_with_age
+  decay.rs    # Rendering: temporal decay, fade-to-paper (legacy)
   prng.rs     # xoshiro128++ per-tile deterministic PRNG
   error.rs    # FmrlError enum for all error conditions
   wasm.rs     # wasm-bindgen WASM bindings (FmrlView type, WASM exports)
 docs/
-  index.html  # Web demo with HTML5 Canvas (GitHub Pages)
-  index.js    # Canvas drawing + WASM integration
+  index.html  # Web demo with HTML5 Canvas (display only, no aging logic)
+  index.js    # Canvas drawing + WASM integration (calls encode/decode)
   style.css
   pkg/        # WASM build output (generated by wasm-pack)
 tests/
@@ -111,17 +140,17 @@ tests/
 
 FMRL supports two color modes:
 
-**Indexed Mode (Classic)**:
-- 4-color palette (ink, paper, accent, highlight)
-- 4-bit packed storage (2 pixels per byte)
-- Smaller file sizes
-- Palette-based decay (ink pixels fade faster)
+**Indexed Mode (v0.4.0 — 16-color)**:
+- 16-color palette (index 0 = paper, 1-15 = colors that age toward paper)
+- Full-byte storage per pixel (no packing, v0.3.0 used nibble packing)
+- Theme-agnostic: grayscale brightness maps to palette indices
+- Smaller file sizes than RGBA
 
 **RGBA Mode (Full Color)**:
 - Full 8-bit RGB + 8-bit alpha per pixel
 - Raw RGBA tile storage (compressed)
 - Larger files but preserves exact colors
-- Uniform decay (no ink-aware multipliers)
+- Uniform decay (all pixels age equally)
 
 ### WASM Surface
 
