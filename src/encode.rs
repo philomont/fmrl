@@ -7,7 +7,7 @@ use crate::age::age_step;
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
-    ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, pack_nibbles, write_chunk,
+    ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, write_chunk,
 };
 
 /// Input image to encode
@@ -162,8 +162,6 @@ fn encode_indexed(
     tiles_x: usize,
     tiles_y: usize,
 ) -> Result<(), FmrlError> {
-    use crate::format::PALETTE_SIZE;
-
     // Step 1: quantize all pixels to palette indices
     let mut indices = vec![0u8; w * h];
     for y in 0..h {

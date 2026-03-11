@@ -253,30 +253,3 @@ pub fn write_chunk(out: &mut Vec<u8>, name: &[u8; 4], data: &[u8]) {
     out.extend_from_slice(&crc.to_be_bytes());
 }
 
-/// Pack palette indices into 4-bit nibbles (high=even pixel, low=odd pixel).
-/// Input length must be even; output is input.len()/2.
-pub fn pack_nibbles(indices: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(indices.len().div_ceil(2));
-    let mut i = 0;
-    while i < indices.len() {
-        let hi = if i < indices.len() { indices[i] & 0x0F } else { 0 };
-        let lo = if i + 1 < indices.len() { indices[i + 1] & 0x0F } else { 0 };
-        out.push((hi << 4) | lo);
-        i += 2;
-    }
-    out
-}
-
-/// Unpack 4-bit nibbles back into palette indices.
-pub fn unpack_nibbles(packed: &[u8], pixel_count: usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(pixel_count);
-    for &byte in packed {
-        out.push((byte >> 4) & 0x0F);
-        out.push(byte & 0x0F);
-        if out.len() >= pixel_count {
-            break;
-        }
-    }
-    out.truncate(pixel_count);
-    out
-}

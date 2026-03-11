@@ -6,7 +6,7 @@ use flate2::read::ZlibDecoder;
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
-    ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, parse_chunk, unpack_nibbles,
+    ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, parse_chunk,
 };
 
 #[derive(Debug)]
