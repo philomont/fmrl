@@ -108,9 +108,9 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
 
 /// Apply one consolidation step using per-tile AGE data.
 ///
-/// Block size increases with consolidation_level: 2×2 → 4×4 → 8×8 → 16×16 → etc.
-/// Tiles with non-paper content are prioritized (start aging from there).
-/// When block size exceeds tile boundaries, step back to largest aligned block.
+/// Block size increases with consolidation_level: 2×2 → 4×4 → 8×8 → 16×16 → 32×32 → 64×64 → etc.
+/// Blocks use deterministic pseudo-random offsets to avoid aligning with features.
+/// Blocks can grow beyond tile boundaries for aggressive consolidation.
 ///
 /// `age_levels` maps each tile to its consolidation level (0=initial, 1=2x2 done, etc.)
 /// Returns the consolidated indices and updated age levels.
@@ -118,7 +118,7 @@ pub fn consolidation_step_with_age(
     indices: &[u8],
     width: usize,
     height: usize,
-    age_levels: &mut [u8], // per-tile consolidation levels
+    age_levels: &mut [u8],
 ) -> Vec<u8> {
     const TILE_SIZE: usize = 32;
     let tiles_x = width / TILE_SIZE;
@@ -131,7 +131,7 @@ pub fn consolidation_step_with_age(
 
     let mut result = indices.to_vec();
 
-    // Build list of tiles with content, sorted by content ratio (most first)
+    // Build list of tiles with content
     let mut tiles_with_content: Vec<(usize, f32)> = Vec::new();
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
@@ -155,60 +155,53 @@ pub fn consolidation_step_with_age(
         }
     }
 
-    // Sort by content ratio descending (tiles with more content age first)
+    // Sort by content ratio descending
     tiles_with_content.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-    // Process tiles in order of content
+    // Process tiles
     for (tile_idx, _ratio) in tiles_with_content {
         let tx = tile_idx % tiles_x;
         let ty = tile_idx / tiles_x;
         let level = age_levels[tile_idx];
 
-        // Calculate block size: 2^(level+1)
+        // Calculate block size: 2^(level+1), no upper limit
         // level 0 -> 2x2, level 1 -> 4x4, level 2 -> 8x8, etc.
-        let mut block_size = 1usize << (level + 1);
+        let block_size = 1usize << (level + 1);
 
-        // Step back if block size doesn't align with tile boundaries
-        // or exceeds image dimensions
-        while block_size > TILE_SIZE {
-            // Check if this block would align with tile grid
-            let tile_aligned = (tx * TILE_SIZE) % block_size == 0 &&
-                              (ty * TILE_SIZE) % block_size == 0;
-            if !tile_aligned || tx * TILE_SIZE + block_size > width ||
-               ty * TILE_SIZE + block_size > height {
-                // Step back to smaller block
-                block_size >>= 1;
-            } else {
-                break;
-            }
-        }
+        // Calculate deterministic random offset for this tile
+        // Use tile coordinates as seed for reproducibility
+        let offset_x = ((tx * 7 + ty * 13) % block_size.max(1)) as isize;
+        let offset_y = ((tx * 11 + ty * 17) % block_size.max(1)) as isize;
 
-        // Also ensure we don't exceed image bounds
-        while tx * TILE_SIZE + block_size > width ||
-              ty * TILE_SIZE + block_size > height {
-            block_size >>= 1;
-        }
+        // Tile origin with offset
+        let base_x = (tx * TILE_SIZE) as isize;
+        let base_y = (ty * TILE_SIZE) as isize;
 
-        // Minimum block size is 2
-        if block_size < 2 {
-            block_size = 2;
-        }
+        // Process blocks with offset, clamped to image bounds
+        let blocks_across = (TILE_SIZE + block_size - 1) / block_size + 1;
 
-        // Apply consolidation to this tile with calculated block size
-        let tx0 = tx * TILE_SIZE;
-        let ty0 = ty * TILE_SIZE;
-        let blocks_per_tile = TILE_SIZE / block_size;
+        for by in 0..blocks_across {
+            for bx in 0..blocks_across {
+                // Block origin with offset
+                let block_x0 = base_x + offset_x + (bx * block_size) as isize;
+                let block_y0 = base_y + offset_y + (by * block_size) as isize;
 
-        for by in 0..blocks_per_tile {
-            for bx in 0..blocks_per_tile {
-                let x0 = tx0 + bx * block_size;
-                let y0 = ty0 + by * block_size;
+                // Clamp to image bounds
+                let x_start = block_x0.max(0) as usize;
+                let y_start = block_y0.max(0) as usize;
+                let x_end = ((block_x0 + block_size as isize).min(width as isize)) as usize;
+                let y_end = ((block_y0 + block_size as isize).min(height as isize)) as usize;
 
-                // Collect all pixels in this block
+                // Skip if no valid area
+                if x_start >= x_end || y_start >= y_end {
+                    continue;
+                }
+
+                // Collect pixels in this block
                 let mut counts = [0u16; 16];
-                for y in 0..block_size {
-                    for x in 0..block_size {
-                        let idx = result[(y0 + y) * width + (x0 + x)];
+                for y in y_start..y_end {
+                    for x in x_start..x_end {
+                        let idx = result[y * width + x];
                         counts[idx as usize] += 1;
                     }
                 }
@@ -224,15 +217,15 @@ pub fn consolidation_step_with_age(
                 }
 
                 // Fill block with consolidated value
-                for y in 0..block_size {
-                    for x in 0..block_size {
-                        result[(y0 + y) * width + (x0 + x)] = best_idx;
+                for y in y_start..y_end {
+                    for x in x_start..x_end {
+                        result[y * width + x] = best_idx;
                     }
                 }
             }
         }
 
-        // Check if tile became all paper after consolidation
+        // Check if tile became all paper
         let tx0 = tx * TILE_SIZE;
         let ty0 = ty * TILE_SIZE;
         let mut all_paper = true;
