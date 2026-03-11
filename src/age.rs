@@ -57,23 +57,24 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
             }
             // Require 4+ paper neighbors (was 3) for gentler aging
             if paper_count >= 4 {
-                next[y * w + x] = 1;
+                next[y * w + x] = PAPER_INDEX;
             }
         }
     }
 
     // ── Pass 2a: short-run elimination — rows ──────────────────────────────
+    // ── Pass 2a: short-run elimination — rows ──────────────────────────────
     for y in 0..h {
         let mut x = 0;
         while x < w {
-            if next[y * w + x] != 1 {
+            if next[y * w + x] != PAPER_INDEX {
                 let start = x;
-                while x < w && next[y * w + x] != 1 {
+                while x < w && next[y * w + x] != PAPER_INDEX {
                     x += 1;
                 }
                 if x - start <= RUN_THRESHOLD {
                     for rx in start..x {
-                        next[y * w + rx] = 1;
+                        next[y * w + rx] = PAPER_INDEX;
                     }
                 }
             } else {
@@ -86,14 +87,14 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
     for x in 0..w {
         let mut y = 0;
         while y < h {
-            if next[y * w + x] != 1 {
+            if next[y * w + x] != PAPER_INDEX {
                 let start = y;
-                while y < h && next[y * w + x] != 1 {
+                while y < h && next[y * w + x] != PAPER_INDEX {
                     y += 1;
                 }
                 if y - start <= RUN_THRESHOLD {
                     for ry in start..y {
-                        next[ry * w + x] = 1;
+                        next[ry * w + x] = PAPER_INDEX;
                     }
                 }
             } else {

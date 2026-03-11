@@ -780,23 +780,35 @@ function saveDebugPng(fmrlBytes, width, height) {
         const ctx = debugCanvas.getContext('2d');
         const imgData = ctx.createImageData(width, height);
 
-        // Fixed grayscale palette (matches storage format, theme-independent):
-        // 0 = ink → black, 1 = paper → transparent, 2 = accent → white, 3 = highlight → gray
+        // v0.4+ grayscale palette (matches storage format, theme-independent):
+        // 0 = paper (white), 1 = ink (black), 2 = accent (mid-gray), 15 = highlight (light-gray)
         const grayscalePalette = [
-            [0, 0, 0],         // 0: ink - black
-            [255, 255, 255],   // 1: paper - white (transparent via alpha=0)
-            [255, 255, 255],   // 2: accent - white
-            [128, 128, 128],   // 3: highlight - gray
+            [255, 255, 255],   // 0: paper - white
+            [0, 0, 0],         // 1: ink - black
+            [119, 119, 119],   // 2: accent - mid-gray
+            [34, 34, 34],      // 3
+            [51, 51, 51],      // 4
+            [68, 68, 68],      // 5
+            [85, 85, 85],      // 6
+            [102, 102, 102],   // 7
+            [136, 136, 136],   // 8
+            [153, 153, 153],   // 9
+            [170, 170, 170],   // 10
+            [187, 187, 187],   // 11
+            [204, 204, 204],   // 12
+            [221, 221, 221],   // 13
+            [238, 238, 238],   // 14
+            [238, 238, 238],   // 15: highlight - light gray
         ];
 
         for (let i = 0; i < width * height; i++) {
             const idx = decodedIndices[i];
-            const [r, g, b] = grayscalePalette[idx];
+            const [r, g, b] = grayscalePalette[idx] || [255, 255, 255];
             imgData.data[i * 4]     = r;
             imgData.data[i * 4 + 1] = g;
             imgData.data[i * 4 + 2] = b;
-            // Paper (index 1) is transparent, others are opaque
-            imgData.data[i * 4 + 3] = idx === 1 ? 0 : 255;
+            // Paper (index 0) is white in debug PNG
+            imgData.data[i * 4 + 3] = 255;  // fully opaque
         }
         ctx.putImageData(imgData, 0, 0);
 
