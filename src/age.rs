@@ -106,79 +106,142 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
     next
 }
 
-/// Apply one consolidation step: reduce effective resolution by 2×.
+/// Apply one consolidation step using per-tile AGE data.
 ///
-/// Divides the image into 2×2 blocks. Each block becomes a single pixel
-/// with the most common index from the 4 pixels. On ties, the lowest
-/// index wins. The result is then upscaled back to original size by
-/// duplicating each consolidated pixel 2×2.
+/// Block size increases with consolidation_level: 2×2 → 4×4 → 8×8 → 16×16 → etc.
+/// Tiles with non-paper content are prioritized (start aging from there).
+/// When block size exceeds tile boundaries, step back to largest aligned block.
 ///
-/// This creates large uniform areas that zlib compresses efficiently,
-/// genuinely reducing information content (file size decreases).
-///
-/// Returns a new Vec with the consolidated indices at original dimensions.
-pub fn consolidation_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
-    assert!(width % 2 == 0 && height % 2 == 0, "dimensions must be even for consolidation");
+/// `age_levels` maps each tile to its consolidation level (0=initial, 1=2x2 done, etc.)
+/// Returns the consolidated indices and updated age levels.
+pub fn consolidation_step_with_age(
+    indices: &[u8],
+    width: usize,
+    height: usize,
+    age_levels: &mut [u8], // per-tile consolidation levels
+) -> Vec<u8> {
+    const TILE_SIZE: usize = 32;
+    let tiles_x = width / TILE_SIZE;
+    let tiles_y = height / TILE_SIZE;
 
-    let half_w = width / 2;
-    let half_h = height / 2;
+    // Initialize age_levels if not already set
+    if age_levels.len() != tiles_x * tiles_y {
+        age_levels.fill(0);
+    }
 
-    // Step 1: consolidate 2×2 blocks into 1 pixel each
-    let mut consolidated = vec![0u8; half_w * half_h];
+    let mut result = indices.to_vec();
 
-    for by in 0..half_h {
-        for bx in 0..half_w {
-            // Collect the 4 pixels in this 2×2 block
-            let x0 = bx * 2;
-            let y0 = by * 2;
+    // Build list of tiles with content, sorted by content ratio (most first)
+    let mut tiles_with_content: Vec<(usize, f32)> = Vec::new();
+    for ty in 0..tiles_y {
+        for tx in 0..tiles_x {
+            let tile_idx = ty * tiles_x + tx;
+            let tx0 = tx * TILE_SIZE;
+            let ty0 = ty * TILE_SIZE;
 
-            let p0 = indices[y0 * width + x0];
-            let p1 = indices[y0 * width + (x0 + 1)];
-            let p2 = indices[(y0 + 1) * width + x0];
-            let p3 = indices[(y0 + 1) * width + (x0 + 1)];
+            let mut non_paper_count = 0;
+            for y in 0..TILE_SIZE {
+                for x in 0..TILE_SIZE {
+                    if indices[(ty0 + y) * width + (tx0 + x)] != 0 {
+                        non_paper_count += 1;
+                    }
+                }
+            }
 
-            // Find most common index, with lowest index winning ties
-            consolidated[by * half_w + bx] = most_common_index([p0, p1, p2, p3]);
+            let ratio = non_paper_count as f32 / (TILE_SIZE * TILE_SIZE) as f32;
+            if non_paper_count > 0 {
+                tiles_with_content.push((tile_idx, ratio));
+            }
         }
     }
 
-    // Step 2: upscale back to original dimensions by 2× duplication
-    let mut result = vec![0u8; width * height];
-    for by in 0..half_h {
-        for bx in 0..half_w {
-            let c = consolidated[by * half_w + bx];
-            let x0 = bx * 2;
-            let y0 = by * 2;
+    // Sort by content ratio descending (tiles with more content age first)
+    tiles_with_content.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-            // Write 2×2 block
-            result[y0 * width + x0] = c;
-            result[y0 * width + (x0 + 1)] = c;
-            result[(y0 + 1) * width + x0] = c;
-            result[(y0 + 1) * width + (x0 + 1)] = c;
+    // Process tiles in order of content
+    for (tile_idx, _ratio) in tiles_with_content {
+        let tx = tile_idx % tiles_x;
+        let ty = tile_idx / tiles_x;
+        let level = age_levels[tile_idx];
+
+        // Calculate block size: 2^(level+1)
+        // level 0 -> 2x2, level 1 -> 4x4, level 2 -> 8x8, etc.
+        let mut block_size = 1usize << (level + 1);
+
+        // Step back if block size doesn't align with tile boundaries
+        // or exceeds image dimensions
+        while block_size > TILE_SIZE {
+            // Check if this block would align with tile grid
+            let tile_aligned = (tx * TILE_SIZE) % block_size == 0 &&
+                              (ty * TILE_SIZE) % block_size == 0;
+            if !tile_aligned || tx * TILE_SIZE + block_size > width ||
+               ty * TILE_SIZE + block_size > height {
+                // Step back to smaller block
+                block_size >>= 1;
+            } else {
+                break;
+            }
         }
+
+        // Also ensure we don't exceed image bounds
+        while tx * TILE_SIZE + block_size > width ||
+              ty * TILE_SIZE + block_size > height {
+            block_size >>= 1;
+        }
+
+        // Minimum block size is 2
+        if block_size < 2 {
+            block_size = 2;
+        }
+
+        // Apply consolidation to this tile with calculated block size
+        let tx0 = tx * TILE_SIZE;
+        let ty0 = ty * TILE_SIZE;
+        let blocks_per_tile = TILE_SIZE / block_size;
+
+        for by in 0..blocks_per_tile {
+            for bx in 0..blocks_per_tile {
+                let x0 = tx0 + bx * block_size;
+                let y0 = ty0 + by * block_size;
+
+                // Collect all pixels in this block
+                let mut counts = [0u16; 16];
+                for y in 0..block_size {
+                    for x in 0..block_size {
+                        let idx = result[(y0 + y) * width + (x0 + x)];
+                        counts[idx as usize] += 1;
+                    }
+                }
+
+                // Find most common (lowest index wins ties)
+                let mut best_idx = 0u8;
+                let mut best_count = counts[0];
+                for i in 1..16 {
+                    if counts[i] > best_count {
+                        best_count = counts[i];
+                        best_idx = i as u8;
+                    }
+                }
+
+                // Fill block with consolidated value
+                for y in 0..block_size {
+                    for x in 0..block_size {
+                        result[(y0 + y) * width + (x0 + x)] = best_idx;
+                    }
+                }
+            }
+        }
+
+        // Increment age level for this tile
+        age_levels[tile_idx] = age_levels[tile_idx].saturating_add(1);
     }
 
     result
 }
 
-/// Find the most common index in 4 values.
-/// Returns the lowest index on ties.
-fn most_common_index([a, b, c, d]: [u8; 4]) -> u8 {
-    // Count occurrences (max index is 15 for 16-color palette)
-    let mut counts = [0u8; 16];
-    counts[a as usize] += 1;
-    counts[b as usize] += 1;
-    counts[c as usize] += 1;
-    counts[d as usize] += 1;
-
-    // Find index with highest count, lowest index on ties
-    let mut best_idx = 0u8;
-    let mut best_count = counts[0];
-    for i in 1..16 {
-        if counts[i] > best_count {
-            best_count = counts[i];
-            best_idx = i as u8;
-        }
-    }
-    best_idx
+/// Simple consolidation step without AGE tracking (for backward compatibility).
+/// Uses 2×2 blocks throughout the image.
+pub fn consolidation_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let mut dummy_age = vec![0u8; (width / 32) * (height / 32)];
+    consolidation_step_with_age(indices, width, height, &mut dummy_age)
 }

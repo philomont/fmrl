@@ -3,7 +3,7 @@ use std::io::Write;
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 
-use crate::age::{age_step, consolidation_step};
+use crate::age::{age_step, consolidation_step_with_age};
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
@@ -20,6 +20,8 @@ pub struct FmrlImage {
     pub pixels: Vec<u8>,
     pub decay_policy: u8,
     pub age_type: AgeType,
+    /// Optional per-tile consolidation levels (for re-saving existing files)
+    pub age_levels: Option<Vec<u8>>,
     pub meta: Option<serde_json::Value>,
 }
 
@@ -34,6 +36,7 @@ impl FmrlImage {
             pixels,
             decay_policy: 0,
             age_type: AgeType::Erosion,
+            age_levels: None,
             meta: None,
         }
     }
@@ -48,6 +51,7 @@ impl FmrlImage {
             pixels,
             decay_policy: 0,
             age_type: AgeType::Erosion,
+            age_levels: None,
             meta: None,
         }
     }
@@ -119,20 +123,27 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     write_chunk(&mut out, CHUNK_IHDR, &ihdr.to_bytes());
 
     // DATA chunk: mode-dependent
-    match image.color_mode {
+    // Get age levels from encoding (for consolidation tracking)
+    let age_levels = match image.color_mode {
         ColorMode::Indexed => encode_indexed(&mut out, image, w, h, tiles_x, tiles_y)?,
-        ColorMode::Rgba => encode_rgba(&mut out, image, w, h, tiles_x, tiles_y)?,
-    }
+        ColorMode::Rgba => {
+            encode_rgba(&mut out, image, w, h, tiles_x, tiles_y)?;
+            vec![0u8; tiles_x * tiles_y] // RGBA doesn't use consolidation
+        }
+    };
 
     // AGE chunk: one entry per tile (row-major)
+    // Use fade_level to store consolidation levels
     let mut age_payload = Vec::with_capacity(tiles_x * tiles_y * AGE_ENTRY_BYTES);
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
+            let tile_idx = ty * tiles_x + tx;
+            let consolidation_level = age_levels.get(tile_idx).copied().unwrap_or(0);
             let entry = AgeEntry {
                 tx: tx as u16,
                 ty: ty as u16,
                 last_view: now_ms,
-                fade_level: 0,
+                fade_level: consolidation_level, // Store consolidation level here
                 noise_seed: [tx as u8, (tx >> 8) as u8, ty as u8, (ty >> 8) as u8],
                 edge_damage: 0,
                 reserved: 0,
@@ -157,6 +168,7 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
 }
 
 /// Encode indexed mode: palette (48 bytes) + tiles with full-byte indices
+/// Returns the updated age levels for saving to AGE chunk.
 fn encode_indexed(
     out: &mut Vec<u8>,
     image: &FmrlImage,
@@ -164,7 +176,7 @@ fn encode_indexed(
     h: usize,
     tiles_x: usize,
     tiles_y: usize,
-) -> Result<(), FmrlError> {
+) -> Result<Vec<u8>, FmrlError> {
     // Step 1: quantize all pixels to palette indices
     let mut indices = vec![0u8; w * h];
     for y in 0..h {
@@ -179,9 +191,15 @@ fn encode_indexed(
     }
 
     // Step 2: apply one aging step based on age_type
+    let mut age_levels = image.age_levels.clone().unwrap_or_else(|| vec![0u8; tiles_x * tiles_y]);
+
     indices = match image.age_type {
-        AgeType::Erosion => age_step(&indices, w, h),
-        AgeType::Consolidation => consolidation_step(&indices, w, h),
+        AgeType::Erosion => {
+            age_step(&indices, w, h)
+        }
+        AgeType::Consolidation => {
+            consolidation_step_with_age(&indices, w, h, &mut age_levels)
+        }
         AgeType::Noise => {
             // TODO: implement noise-based aging
             age_step(&indices, w, h)
@@ -209,7 +227,7 @@ fn encode_indexed(
         }
     }
     write_chunk(out, CHUNK_DATA, &data_payload);
-    Ok(())
+    Ok(age_levels)
 }
 
 /// Encode RGBA mode: paper color (3 bytes) + raw RGBA tiles
