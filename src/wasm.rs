@@ -2,7 +2,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::age::age_step;
+use crate::age::{age_step, consolidation_step};
 use crate::decode::{DecodedFmrl, decode};
 use crate::encode::{FmrlImage, encode};
 use crate::format::{AgeType, ColorMode, Palette, TILE_SIZE};
@@ -252,6 +252,17 @@ fn quantize_to_palette(r: u8, g: u8, b: u8, a: u8) -> u8 {
 #[wasm_bindgen]
 pub fn age_step_indices(data: &[u8], width: u16, height: u16) -> Vec<u8> {
     age_step(data, width as usize, height as usize)
+}
+
+/// Apply one consolidation step: reduce resolution by 2× then upscale back.
+///
+/// `data` must be `width * height` bytes of palette indices.
+/// Each 2×2 block becomes one pixel with the most common index (lowest wins ties).
+/// Result is upscaled back to original dimensions by duplication.
+/// See `age::consolidation_step` for the full algorithm description.
+#[wasm_bindgen]
+pub fn consolidation_step_indices(data: &[u8], width: u16, height: u16) -> Vec<u8> {
+    consolidation_step(data, width as usize, height as usize)
 }
 
 /// Create a fresh demo .fmrl file with a manuscript-like pattern.

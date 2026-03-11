@@ -52,6 +52,16 @@ export class FmrlView {
 export function age_step_indices(data: Uint8Array, width: number, height: number): Uint8Array;
 
 /**
+ * Apply one consolidation step: reduce resolution by 2× then upscale back.
+ *
+ * `data` must be `width * height` bytes of palette indices.
+ * Each 2×2 block becomes one pixel with the most common index (lowest wins ties).
+ * Result is upscaled back to original dimensions by duplication.
+ * See `age::consolidation_step` for the full algorithm description.
+ */
+export function consolidation_step_indices(data: Uint8Array, width: number, height: number): Uint8Array;
+
+/**
  * Create a fresh demo .fmrl file with a manuscript-like pattern.
  * The initial last_view is set 20 days in the past so decay is visible immediately.
  */
@@ -105,6 +115,7 @@ export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_fmrlview_free: (a: number, b: number) => void;
     readonly age_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly consolidation_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
     readonly create_demo_fmrl: () => [number, number, number, number];
     readonly decode_to_indices: (a: number, b: number) => [number, number, number, number];
     readonly decode_to_rgba: (a: number, b: number) => [number, number, number, number];

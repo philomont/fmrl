@@ -140,6 +140,27 @@ export function age_step_indices(data, width, height) {
 }
 
 /**
+ * Apply one consolidation step: reduce resolution by 2× then upscale back.
+ *
+ * `data` must be `width * height` bytes of palette indices.
+ * Each 2×2 block becomes one pixel with the most common index (lowest wins ties).
+ * Result is upscaled back to original dimensions by duplication.
+ * See `age::consolidation_step` for the full algorithm description.
+ * @param {Uint8Array} data
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8Array}
+ */
+export function consolidation_step_indices(data, width, height) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.consolidation_step_indices(ptr0, len0, width, height);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
  * Create a fresh demo .fmrl file with a manuscript-like pattern.
  * The initial last_view is set 20 days in the past so decay is visible immediately.
  * @returns {Uint8Array}

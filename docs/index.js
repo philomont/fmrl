@@ -1,6 +1,6 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, decode_to_indices } from './pkg/fmrl.js';
+import init, { FmrlView, encode_rgba, encode_rgba_with_age, decode_to_indices, age_step_indices, consolidation_step_indices } from './pkg/fmrl.js';
 
-// Age type: 0 = erosion (default), 1 = fade, 2 = noise
+// Age type: 0 = erosion (default), 1 = consolidation
 let currentAgeType = 0;
 
 // ── Canvas dimensions ───────────────────────────────────────────────────────
@@ -460,8 +460,71 @@ function _doAgeStep(src, full = true) {
     return next;
 }
 
+// _doConsolidationStep(src):
+//   Reduce effective resolution by 2×: each 2×2 block becomes 1 pixel
+//   with the most common index (lowest index wins ties).
+//   Result is upscaled back to original size by duplication.
+function _doConsolidationStep(src) {
+    const w = W, h = H;
+    const halfW = w / 2;
+    const halfH = h / 2;
+
+    // Step 1: consolidate 2×2 blocks
+    const consolidated = new Uint8Array(halfW * halfH);
+    for (let by = 0; by < halfH; by++) {
+        for (let bx = 0; bx < halfW; bx++) {
+            const x0 = bx * 2;
+            const y0 = by * 2;
+
+            const p0 = src[y0 * w + x0];
+            const p1 = src[y0 * w + (x0 + 1)];
+            const p2 = src[(y0 + 1) * w + x0];
+            const p3 = src[(y0 + 1) * w + (x0 + 1)];
+
+            consolidated[by * halfW + bx] = mostCommonIndex(p0, p1, p2, p3);
+        }
+    }
+
+    // Step 2: upscale back by 2× duplication
+    const result = new Uint8Array(w * h);
+    for (let by = 0; by < halfH; by++) {
+        for (let bx = 0; bx < halfW; bx++) {
+            const c = consolidated[by * halfW + bx];
+            const x0 = bx * 2;
+            const y0 = by * 2;
+
+            result[y0 * w + x0] = c;
+            result[y0 * w + (x0 + 1)] = c;
+            result[(y0 + 1) * w + x0] = c;
+            result[(y0 + 1) * w + (x0 + 1)] = c;
+        }
+    }
+
+    return result;
+}
+
+// Find most common index in 4 values. Lowest index wins ties.
+function mostCommonIndex(a, b, c, d) {
+    const counts = new Uint8Array(16);
+    counts[a]++;
+    counts[b]++;
+    counts[c]++;
+    counts[d]++;
+
+    let bestIdx = 0;
+    let bestCount = counts[0];
+    for (let i = 1; i < 16; i++) {
+        if (counts[i] > bestCount) {
+            bestCount = counts[i];
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
+}
+
 function applyAge(n = 1) {
-    for (let i = 0; i < n; i++) indices = _doAgeStep(indices, true);
+    const doStep = currentAgeType === 1 ? _doConsolidationStep : _doAgeStep;
+    for (let i = 0; i < n; i++) indices = doStep(indices, true);
     render();
     updateMetric();
 }
@@ -563,8 +626,10 @@ function setPassiveAging(enabled) {
         passiveTimer = setInterval(() => {
             // Age the base snapshot in sync so the cursor-blink restore doesn't
             // revert the canvas to an un-aged state while text is being typed.
-            if (textBaseIndices) textBaseIndices = _doAgeStep(textBaseIndices, false);
-            indices = _doAgeStep(indices, false);
+            // Note: consolidation is always "full" (no partial mode)
+            const doStep = currentAgeType === 1 ? _doConsolidationStep : (src) => _doAgeStep(src, false);
+            if (textBaseIndices) textBaseIndices = doStep(textBaseIndices);
+            indices = doStep(indices);
             if (textCursor) _blitText(textBuffer + (cursorBlink ? '|' : ''));
             else render();
             updateMetric();
