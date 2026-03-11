@@ -158,21 +158,31 @@ impl AgeEntry {
     }
 }
 
-/// 4-color RGB palette
+/// Number of palette entries (16 for v0.4+ format)
+pub const PALETTE_SIZE: usize = 16;
+
+/// 16-color RGB palette (v0.4+ format)
+/// Index 0 is paper (white, doesn't age)
+/// Indices 1-15 are colors that age toward paper
 #[derive(Debug, Clone)]
-pub struct Palette(pub [[u8; 3]; 4]);
+pub struct Palette(pub [[u8; 3]; PALETTE_SIZE]);
 
 impl Default for Palette {
     fn default() -> Self {
-        // Grayscale storage palette for direct mapping:
-        // Each index has a unique grayscale value for deterministic quantization.
-        // Index 1 (paper) uses alpha=0 (transparent), so its RGB can be anything.
-        Palette([
-            [0, 0, 0],         // 0: ink - black
-            [255, 255, 255],   // 1: paper - white (transparent via alpha=0)
-            [255, 255, 255],   // 2: accent - full white (opaque)
-            [128, 128, 128],   // 3: highlight - 50% gray
-        ])
+        // Grayscale storage palette:
+        // Index 0 = paper (white, transparent, doesn't age)
+        // Index 1 = ink (black)
+        // Indices 2-15 = grayscale steps toward white
+        // Each step is 17 grayscale units (256/15 ≈ 17)
+        let mut colors = [[0u8; 3]; PALETTE_SIZE];
+        // Paper (index 0) - white, treated as transparent via alpha
+        colors[0] = [255, 255, 255];
+        // Color indices 1-15: black to almost-white
+        for i in 1..PALETTE_SIZE {
+            let gray = ((PALETTE_SIZE - i) * 17).min(255) as u8;
+            colors[i] = [gray, gray, gray];
+        }
+        Palette(colors)
     }
 }
 

@@ -4,6 +4,12 @@ use crate::prng::TilePrng;
 
 const THIRTY_DAYS_MS: f32 = 30.0 * 24.0 * 3600.0 * 1000.0;
 
+/// Paper index for v0.4+ format
+const PAPER_INDEX: u8 = 0;
+
+/// Ink index for v0.4+ format (darkest color, index 1)
+const INK_INDEX: u8 = 1;
+
 /// Derive the effective fade factor for a tile given the global decay_policy.
 /// policy=0: ink-heavy tiles get 1.5×, background tiles get 0.5×.
 /// Only applies to indexed mode; RGBA mode uses uniform decay.
@@ -12,7 +18,7 @@ fn effective_fade(base_fade: f32, tile: &TileData, decay_policy: u8, color_mode:
         return base_fade;
     }
     let indices = tile.indices();
-    let ink_count = indices.iter().filter(|&&i| i == 0).count();
+    let ink_count = indices.iter().filter(|&&i| i == INK_INDEX).count();
     let total = indices.len();
     let ink_ratio = ink_count as f32 / total as f32;
 
@@ -66,20 +72,22 @@ fn render_tile_inner(tile: &TileData, age: &AgeEntry, palette: &Palette, fade: f
 }
 
 fn render_tile_indexed(tile: &TileData, age: &AgeEntry, palette: &Palette, fade: f32) -> Vec<u8> {
+    use crate::format::PALETTE_SIZE;
+
     let pixel_count = TILE_SIZE * TILE_SIZE;
     let mut output = vec![255u8; pixel_count * 4];
     let mut prng = TilePrng::from_tile(age);
 
     // Paper color is the target state — all non-paper pixels fade toward it.
-    let [paper_r, paper_g, paper_b] = palette.0[1];
+    let [paper_r, paper_g, paper_b] = palette.0[PAPER_INDEX as usize];
     let indices = tile.indices();
 
     for i in 0..pixel_count {
         let idx = indices[i] as usize;
-        let [r, g, b] = palette.0[idx.min(3)];
+        let [r, g, b] = palette.0[idx.min(PALETTE_SIZE - 1)];
 
-        // 1. Fade toward paper color. Paper pixels (idx==1) are already at rest.
-        let (mut pr, mut pg, mut pb) = if idx == 1 {
+        // 1. Fade toward paper color. Paper pixels (idx==0) are already at rest.
+        let (mut pr, mut pg, mut pb) = if idx == PAPER_INDEX as usize {
             (r, g, b)
         } else {
             (
@@ -92,7 +100,7 @@ fn render_tile_indexed(tile: &TileData, age: &AgeEntry, palette: &Palette, fade:
         // 2. Edge erosion: edge pixels stochastically convert to paper.
         //    Probability gates on edge_damage accumulated over views.
         //    Result is always paper — this reduces information, not adds it.
-        if idx != 1 && is_stroke_edge_indexed(indices, i) {
+        if idx != PAPER_INDEX as usize && is_stroke_edge_indexed(indices, i) {
             let edge_prob = (age.edge_damage as f32 / 100.0) * fade;
             if prng.next_f32() < edge_prob {
                 pr = paper_r;
@@ -105,8 +113,8 @@ fn render_tile_indexed(tile: &TileData, age: &AgeEntry, palette: &Palette, fade:
         output[base] = pr;
         output[base + 1] = pg;
         output[base + 2] = pb;
-        // Paper (index 1) is transparent, all others are opaque
-        output[base + 3] = if idx == 1 { 0 } else { 255 };
+        // Paper (index 0) is transparent, all others are opaque
+        output[base + 3] = if idx == PAPER_INDEX as usize { 0 } else { 255 };
     }
 
     output
@@ -118,7 +126,7 @@ fn render_tile_rgba(tile: &TileData, age: &AgeEntry, palette: &Palette, fade: f3
     let mut prng = TilePrng::from_tile(age);
 
     // Paper color is the target state
-    let [paper_r, paper_g, paper_b] = palette.0[1];
+    let [paper_r, paper_g, paper_b] = palette.0[PAPER_INDEX as usize];
     let rgba = tile.rgba();
 
     for i in 0..pixel_count {

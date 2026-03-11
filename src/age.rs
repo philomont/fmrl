@@ -2,10 +2,13 @@
 /// erased.  Runs of this length or shorter become paper.
 const RUN_THRESHOLD: usize = 2;
 
+/// Paper index - pixels with this index don't age and are the erosion target.
+const PAPER_INDEX: u8 = 0;
+
 /// Apply one aging step to a flat, row-major array of palette indices.
 ///
 /// `indices` is `width × height` bytes; each byte is a palette index where
-/// `1` means paper.  Returns a new Vec with the aged indices.
+/// `0` means paper.  Returns a new Vec with the aged indices.
 ///
 /// Two passes, both of which can only convert pixels *to* paper:
 ///
@@ -22,7 +25,7 @@ const RUN_THRESHOLD: usize = 2;
 ///
 /// Because both passes only convert to paper, the information content of the
 /// image is strictly non-increasing.  Repeated application eventually renders
-/// all pixels paper (all indices equal 1).
+/// all pixels paper (all indices equal 0).
 pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
     let mut next = indices.to_vec();
     let w = width;
@@ -31,7 +34,7 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
     // ── Pass 1: morphological erosion ──────────────────────────────────────
     for y in 0..h {
         for x in 0..w {
-            if indices[y * w + x] == 1 {
+            if indices[y * w + x] == PAPER_INDEX {
                 continue; // paper is immune
             }
             let mut paper_count: u32 = 0;
@@ -46,7 +49,7 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
                         || nx >= w as i32
                         || ny < 0
                         || ny >= h as i32
-                        || indices[ny as usize * w + nx as usize] == 1;
+                        || indices[ny as usize * w + nx as usize] == PAPER_INDEX;
                     if is_paper {
                         paper_count += 1;
                     }

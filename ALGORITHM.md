@@ -6,22 +6,32 @@
 
 ## Overview
 
-FMRL stores images using a theme-independent grayscale palette. Files age with every viewing through morphological erosion, genuinely losing information rather than obscuring it with noise.
+FMRL stores images using a 16-color grayscale palette. Files age with every viewing through morphological erosion, genuinely losing information rather than obscuring it with noise.
+
+**Version:** 0.4.0 (16-color indexed format)
 
 ---
 
 ## Storage Format
 
-### Palette Mapping (Theme-Independent)
+### Palette Structure
 
-| Index | Grayscale | Alpha | Meaning   | Renders As                    |
-|-------|-----------|-------|-----------|-------------------------------|
-| 0     | [0,0,0]   | 255   | ink       | `--ink` (theme color)         |
-| 1     | [255,255,255] | 0 | paper   | `--paper` (transparent)       |
-| 2     | [255,255,255] | 255   | accent    | `--accent` (theme color)      |
-| 3     | [128,128,128] | 255   | highlight | `--highlight` (theme color)   |
+The format uses a 16-entry RGB palette (48 bytes total). Each entry is 3 bytes (R, G, B).
 
-**Key insight:** Index 1 (paper) is distinguished from index 2 (accent) by alpha, not by RGB values. This allows theme-independent storage while supporting both "paper" (background/eraser) and "accent" (bright strokes).
+| Index | Grayscale Value | Alpha | Role |
+|-------|-----------------|-------|------|
+| 0 | 255 (white) | 0 | Paper/Background — does not age |
+| 1 | 0 (black) | 255 | Darkest color — ink |
+| 2 | 17 | 255 | Dark gray |
+| 3 | 34 | 255 | |
+| ... | ... | 255 | |
+| 14 | 238 | 255 | Light gray |
+| 15 | 255 | 255 | Lightest non-paper |
+
+**Key properties:**
+- Index 0 is special: treated as transparent (alpha=0) and does not age
+- Indices 1-15 age toward index 0 (paper) over time
+- Each step decrements by 17 (256/15 ≈ 17) from white to black
 
 ---
 
@@ -31,40 +41,36 @@ FMRL stores images using a theme-independent grayscale palette. Files age with e
 RGBA pixel: `(r, g, b, a)` where each channel is 0-255.
 
 ### Output
-Palette index: `0 | 1 | 2 | 3`
+Palette index: `0` to `15`
 
 ### Pseudocode
 
 ```
 function quantize(r, g, b, a) -> u8:
-    // Step 1: Alpha check distinguishes paper from accent
+    // Step 1: Alpha check — transparent pixels become paper
     if a < 128:
-        return 1                    // paper (transparent)
+        return 0                    // paper (transparent)
 
-    // Step 2: Brightness for opaque pixels
-    brightness = (r + g + b) / 3
+    // Step 2: Map brightness to color indices 1-15
+    brightness = (r + g + b) / 3    // 0-255
 
-    if brightness < 64:
-        return 0                    // ink (dark)
-    else if brightness > 191:
-        return 2                    // accent (bright)
-    else:
-        return 3                    // highlight (mid)
+    // 15 color steps, each ~17 units wide
+    step = 256 / 15                 // ≈ 17
+    color_idx = (brightness / step).min(14) + 1
+
+    return color_idx as u8          // 1-15
 ```
 
-### Decision Tree
+### Mapping
 
-```
-                    alpha < 128?
-                   /            \
-                 YES             NO
-                  |               |
-               paper(1)      brightness?
-                            /    |    \
-                         <64   64-191   >191
-                          |      |       |
-                        ink(0) highlight(3) accent(2)
-```
+| Brightness Range | Output Index | Color |
+|------------------|--------------|-------|
+| 0-16 | 1 | Black (ink) |
+| 17-33 | 2 | Dark gray |
+| 34-50 | 3 | |
+| ... | ... | Graduated steps |
+| 221-237 | 14 | Light gray |
+| 238-255 | 15 | Lightest |
 
 ---
 
@@ -85,17 +91,17 @@ function quantize(r, g, b, a) -> u8:
 │   ├── interlace (u8 = 0)
 │   └── decay_policy (u8)
 │
-├── DATA chunk
-│   ├── Indexed mode:
-│   │   ├── palette (12 bytes: 4 colors × 3 RGB)
-│   │   └── tiles: for each 32×32 tile:
-│   │       ├── compressed_len (u16 LE)
-│   │       ├── flags (u8)
-│   │       └── zlib compressed nibbles
-│   │           └── packed: 2 pixels per byte (high=even, low=odd)
-│   └── RGBA mode:
-│       ├── paper_color (3 bytes RGB)
-│       └── tiles: raw RGBA per tile, zlib compressed
+├── DATA chunk (indexed mode)
+│   ├── palette (48 bytes: 16 colors × 3 RGB)
+│   └── tiles: for each 32×32 tile:
+│       ├── compressed_len (u16 LE)
+│       ├── flags (u8)
+│       └── zlib compressed data
+│           └── raw indices (1 byte per pixel)
+│
+├── DATA chunk (RGBA mode)
+│   ├── paper_color (3 bytes RGB)
+│   └── tiles: raw RGBA per tile, zlib compressed
 │
 ├── AGE chunk (one entry per tile)
 │   ├── tx (u16 LE)          // tile x coordinate
@@ -121,25 +127,20 @@ Raw RGBA pixels
        │
        ▼
 ┌─────────────────┐
-│ Quantize pixels │  ← alpha-aware, brightness-based
-│ to 4 indices    │
+│ Quantize pixels │  ← alpha-aware, 16 grayscale levels
+│ to 16 indices   │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ Apply age_step  │  ← one aging cycle during save
-│ (erosion)       │
+│ Apply age_step  │  ← morphological erosion
+│ (optional)      │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
 │ Partition into  │
 │ 32×32 tiles     │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Pack nibbles    │  ← 2 indices per byte (high=even)
 └────────┬────────┘
          │
          ▼
@@ -162,49 +163,38 @@ Raw RGBA pixels
 
 ## Aging Algorithm
 
-FMRL aging uses morphological erosion with two phases: **erosion** and **short-run elimination**.
+FMRL aging uses morphological erosion to gradually reduce non-paper pixels.
 
 ### Phase 1: Morphological Erosion
 
-A non-paper pixel becomes paper if it has **≥3 paper 8-neighbors**.
+A non-paper pixel (index > 0) becomes paper if it has **≥ 4 paper 8-neighbors**.
 
 ```
-// 8-neighborhood (N = north, S = south, etc.)
     N
   W C E    // C = center pixel being evaluated
     S
    NW NE
    SW SE
 
-if index[C] != 1:  // not already paper
-    paper_neighbors = count(index[N,S,E,W,NW,NE,SW,SE] == 1)
-    if paper_neighbors >= 3:
-        index[C] = 1  // erode to paper
+if index[C] > 0:  // not paper
+    paper_neighbors = count(index[N,S,E,W,NW,NE,SW,SE] == 0)
+    if paper_neighbors >= 4:
+        index[C] = 0  // erode to paper
 ```
-
-**Why ≥3?** Any finite solid shape has corner pixels with exactly 3 paper neighbors. This guarantees convergence to all-paper with enough iterations.
 
 ### Phase 2: Short-Run Elimination
 
-After erosion, eliminate thin isolated features for better compression:
+After erosion, eliminate thin isolated features:
 
-1. **Horizontal pass**: Find runs of non-paper pixels ≤2 wide, replace with paper
+1. **Horizontal pass**: Find runs of non-paper pixels ≤ 2 wide, replace with paper
 2. **Vertical pass**: Same for columns
 
-```
-Before:  ink ink paper ink ink paper ink    (isolated pairs)
-After:   paper paper paper paper paper paper paper
-```
+### Convergence
 
-This collapses noise-like features and increases zlib compression ratios.
-
-### Convergence Guarantee
-
-The algorithm converges to all-paper because:
-- Every solid pixel on a convex corner has exactly 3 paper neighbors
-- These corners erode inward, shrinking any finite shape
-- Thin features (≤2 pixels wide) are eliminated by short-run removal
-- No finite fixed point exists other than all-paper
+The algorithm converges to all-paper (all indices = 0) because:
+- Index 0 is the only fixed point
+- All operations only convert non-paper to paper
+- No operation creates non-paper pixels
 
 ---
 
@@ -215,7 +205,7 @@ The algorithm converges to all-paper because:
      │
      ▼
 ┌─────────────────┐
-│ Parse chunks    │  ← verify CRC-32 on each
+│ Parse chunks    │  ← verify CRC-32
 └────────┬────────┘
          │
          ▼
@@ -225,18 +215,13 @@ The algorithm converges to all-paper because:
          │
          ▼
 ┌─────────────────┐
-│ Unpack nibbles  │  ← expand to indices
+│ Apply decay     │  ← temporal fade toward paper
+│ (optional)      │
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ Render with     │  ← theme colors applied here
-│ theme palette   │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Update AGE      │  ← mutate last_view timestamp
+│ Update AGE      │  ← mutate timestamps
 │ chunk in-place  │
 └────────┬────────┘
          │
@@ -248,20 +233,19 @@ The algorithm converges to all-paper because:
 
 ## Decay Model
 
-Each view applies temporal decay based on `last_view` timestamp:
+Optional temporal decay based on `last_view` timestamp:
 
 1. **Calculate age**: `age_ms = now_ms - last_view`
 2. **Fade factor**: `fade = min(1.0, age_ms / (30 days in ms))`
 3. **Apply to render**:
-   - Indices fade toward paper color based on fade factor
-   - Edge damage accumulates stochastically
-   - Deterministic PRNG per tile (xoshiro128++)
+   - Pixels fade toward paper color based on fade factor
+   - Edge pixels may stochastically convert to paper
 
 ---
 
 ## Byte Layout Reference
 
-### Chunk Structure (PNG-compatible)
+### Chunk Structure
 
 ```
 [length: u32 BE][type: 4 bytes][data: length bytes][crc: u32 BE]
@@ -286,26 +270,28 @@ Offset  Size    Field
 
 ## Implementation Notes
 
-### Rust (Core Codec)
-- `quantize_pixel()` in `src/encode.rs` — alpha + brightness logic
-- `age_step()` in `src/age.rs` — morphological erosion
-- `Palette::default()` in `src/format.rs` — storage palette
+### Core Codec (Rust)
 
-### JavaScript (Web App)
-- `STORAGE_PALETTE` — mirrors Rust palette for debug PNG export
-- `indicesToGrayscaleRgba()` — converts indices to grayscale RGBA
+| Function | File | Purpose |
+|----------|------|---------|
+| `quantize_pixel()` | `src/encode.rs` | RGBA → 16 palette indices |
+| `age_step()` | `src/age.rs` | Morphological erosion |
+| `Palette::default()` | `src/format.rs` | 16-entry grayscale palette |
+| `PALETTE_SIZE` | `src/format.rs` | Constant = 16 |
 
 ### WASM Surface
-- `encode_rgba()` — quantizes and ages on save
-- `decode_to_indices()` — loads without decay for editing
-- `decode_and_decay()` — renders with decay for display
+
+- `encode_rgba()` — encode with indexed mode
+- `encode_rgba_full()` — encode with RGBA mode
+- `decode_to_indices()` — decode to palette indices
+- `decode_to_rgba()` — decode to RGBA pixels
+- `age_step_indices()` — apply one aging step
 
 ---
 
 ## Design Principles
 
-1. **Theme independence**: Storage uses grayscale, rendering applies theme
-2. **Information loss**: Aging removes pixels permanently; compression improves as data degrades
-3. **Determinism**: Same file + same state = same render everywhere
-4. **Self-contained**: All decay state lives in AGE chunk
-5. **Convergence**: Guaranteed to reach all-paper with repeated aging
+1. **Determinism**: Same file + same state = same output everywhere
+2. **Information loss**: Aging removes pixels permanently
+3. **Self-contained**: All state in AGE chunk
+4. **Extensible**: 16-color palette supports future theme mapping

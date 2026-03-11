@@ -52,34 +52,30 @@ impl FmrlImage {
 
 /// Quantize an RGBA pixel to a palette index using alpha + grayscale mapping.
 ///
-/// Storage format (theme-agnostic):
-/// 0 = ink (black [0,0,0], alpha=255) → renders as theme --ink
-/// 1 = paper (transparent, alpha=0) → renders as theme --paper
-/// 2 = accent (white [255,255,255], alpha=255) → renders as theme --accent
-/// 3 = highlight (gray [128,128,128], alpha=255) → renders as theme --highlight
+/// Storage format (v0.4+, theme-agnostic):
+/// Index 0 = paper (white, alpha=0) → renders as theme --paper
+/// Index 1 = ink (black [0,0,0], alpha=255) → renders as theme --ink
+/// Index 2-15 = grayscale steps → map to theme colors
 ///
-/// Alpha is checked first to distinguish paper (transparent) from accent (white).
+/// Alpha is checked first to distinguish paper (transparent) from colors.
 fn quantize_pixel(r: u8, g: u8, b: u8, a: u8) -> u8 {
-    // Transparent pixels are paper (index 1)
-    // This distinguishes paper (alpha=0) from accent (white, alpha=255)
+    use crate::format::PALETTE_SIZE;
+
+    // Transparent pixels are paper (index 0)
     if a < 128 {
-        return 1;
+        return 0;
     }
 
     // For opaque pixels, use brightness for grayscale mapping
     let brightness = (r as u16 + g as u16 + b as u16) / 3;
 
-    // Direct mapping based on brightness thresholds:
-    // 0-63   → ink (black)
-    // 64-191 → highlight (gray)
-    // 192+   → accent (white)
-    if brightness < 64 {
-        0 // ink - black
-    } else if brightness > 191 {
-        2 // accent - white
-    } else {
-        3 // highlight - gray
-    }
+    // Map brightness (0-255) to color indices 1-15
+    // Index 1 = black (brightness 0-16)
+    // Index 15 = almost-white (brightness 240-255)
+    let color_count = PALETTE_SIZE - 1; // 15 colors (indices 1-15)
+    let step = 256 / color_count as u16; // ~17 per step
+    let color_idx = ((brightness / step).min(color_count as u16 - 1) + 1) as u8;
+    color_idx
 }
 
 /// Compress bytes with zlib (not raw DEFLATE).
@@ -157,7 +153,7 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     Ok(out)
 }
 
-/// Encode indexed mode: palette (12 bytes) + packed nibble tiles
+/// Encode indexed mode: palette (48 bytes) + tiles with full-byte indices
 fn encode_indexed(
     out: &mut Vec<u8>,
     image: &FmrlImage,
@@ -166,6 +162,8 @@ fn encode_indexed(
     tiles_x: usize,
     tiles_y: usize,
 ) -> Result<(), FmrlError> {
+    use crate::format::PALETTE_SIZE;
+
     // Step 1: quantize all pixels to palette indices
     let mut indices = vec![0u8; w * h];
     for y in 0..h {
@@ -180,22 +178,22 @@ fn encode_indexed(
     }
 
     // Step 2: apply one aging step (morphological erosion + short-run elimination)
-    // This is the FMRL protocol: each encode->decode cycle ages the image
     indices = age_step(&indices, w, h);
 
-    // DATA chunk: palette (12 bytes) + tiles
+    // DATA chunk: palette (48 bytes) + tiles
     let mut data_payload: Vec<u8> = Vec::new();
-    // Palette: 4 colors × 3 bytes RGB
+    // Palette: PALETTE_SIZE colors × 3 bytes RGB
     for color in &image.palette.0 {
         data_payload.extend_from_slice(color);
     }
 
-    // Per-tile: [u16 compressed_len LE][u8 flags][compressed nibble data]
+    // Per-tile: [u16 compressed_len LE][u8 flags][compressed full-byte data]
+    // Full bytes (no nibbles) for 16-color support
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
             let tile_indices = extract_tile_indices(&indices, w, tx, ty);
-            let packed = pack_nibbles(&tile_indices);
-            let compressed = zlib_compress(&packed)?;
+            // No nibble packing - use full bytes directly
+            let compressed = zlib_compress(&tile_indices)?;
             let len = compressed.len() as u16;
             data_payload.extend_from_slice(&len.to_le_bytes());
             data_payload.push(0u8); // flags
@@ -217,8 +215,8 @@ fn encode_rgba(
 ) -> Result<(), FmrlError> {
     // DATA chunk: paper color RGB (3 bytes) + tiles
     let mut data_payload: Vec<u8> = Vec::new();
-    // Store paper color for fade target
-    data_payload.extend_from_slice(&image.palette.0[1]);
+    // Store paper color for fade target (index 0 is paper in v0.4+)
+    data_payload.extend_from_slice(&image.palette.0[0]);
 
     // Per-tile: [u16 compressed_len LE][u8 flags][compressed RGBA data]
     for ty in 0..tiles_y {

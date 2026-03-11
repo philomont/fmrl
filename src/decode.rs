@@ -193,12 +193,15 @@ fn parse_data_chunk(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<TileD
 }
 
 fn parse_data_chunk_indexed(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<TileData>), FmrlError> {
-    if data.len() < 12 {
+    use crate::format::PALETTE_SIZE;
+
+    let palette_bytes = PALETTE_SIZE * 3;
+    if data.len() < palette_bytes {
         return Err(FmrlError::MalformedChunk("DATA chunk too short for palette"));
     }
-    // Palette: 4 × RGB
-    let mut palette_colors = [[0u8; 3]; 4];
-    for i in 0..4 {
+    // Palette: PALETTE_SIZE × RGB
+    let mut palette_colors = [[0u8; 3]; PALETTE_SIZE];
+    for i in 0..PALETTE_SIZE {
         palette_colors[i] = [data[i * 3], data[i * 3 + 1], data[i * 3 + 2]];
     }
     let palette = Palette(palette_colors);
@@ -210,7 +213,7 @@ fn parse_data_chunk_indexed(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, V
     let pixel_count = TILE_SIZE * TILE_SIZE;
 
     let mut tiles = Vec::with_capacity(tiles_x * tiles_y);
-    let mut pos = 12usize;
+    let mut pos = palette_bytes;
 
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
@@ -248,9 +251,9 @@ fn parse_data_chunk_rgba(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<
     }
     // Paper color: 3 bytes RGB (used as fade target)
     let paper_color = [data[0], data[1], data[2]];
-    // Create a palette with paper as index 1, others default
+    // Create a palette with paper as index 0, others default
     let mut palette = Palette::default();
-    palette.0[1] = paper_color;
+    palette.0[0] = paper_color;
 
     let w = ihdr.width as usize;
     let h = ihdr.height as usize;

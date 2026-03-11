@@ -24,7 +24,8 @@ fn encoded_size(indices: &[u8], width: usize, height: usize, palette: &Palette) 
 }
 
 fn all_paper(width: usize, height: usize) -> Vec<u8> {
-    vec![1u8; width * height]
+    // Index 0 = paper in v0.4+ format
+    vec![0u8; width * height]
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────
@@ -41,40 +42,42 @@ fn aging_converges_to_all_paper() {
     // Varied canvas: solid block, lines, diagonal, checkerboard patch.
     let mut indices = all_paper(w, h);
 
-    // 32×32 solid ink block near centre
+    // 32×32 solid ink block near centre (ink = index 1 in v0.4+)
     for y in 48..80 {
         for x in 48..80 {
-            indices[y * w + x] = 0;
+            indices[y * w + x] = 1;
         }
     }
     // Horizontal line across the upper third
     for x in 0..w {
-        indices[32 * w + x] = 0;
+        indices[32 * w + x] = 1;
     }
     // 2-pixel-wide diagonal
     for i in 0..64usize {
-        indices[i * w + i] = 0;
+        indices[i * w + i] = 1;
         if i + 1 < w {
-            indices[i * w + (i + 1)] = 0;
+            indices[i * w + (i + 1)] = 1;
         }
     }
     // 16×16 checkerboard patch (worst case for per-pixel compression)
     for y in 8..24 {
         for x in 96..112 {
             if (x + y) % 2 == 0 {
-                indices[y * w + x] = 0;
+                indices[y * w + x] = 1;
             }
         }
     }
 
     let all_paper_size = encoded_size(&all_paper(w, h), w, h, &palette);
-    let initial_non_paper: usize = indices.iter().filter(|&&p| p != 1).count();
+    // Count non-paper pixels (index 0 is paper in v0.4+)
+    let initial_non_paper: usize = indices.iter().filter(|&&p| p != 0).count();
 
     let max_steps = 300;
     for step in 1..=max_steps {
         indices = age_step(&indices, w, h);
 
-        if indices.iter().all(|&p| p == 1) {
+        // Check for all paper (index 0 in v0.4+)
+        if indices.iter().all(|&p| p == 0) {
             let size = encoded_size(&indices, w, h, &palette);
             assert_eq!(
                 size, all_paper_size,
@@ -85,7 +88,8 @@ fn aging_converges_to_all_paper() {
         }
     }
 
-    let remaining: usize = indices.iter().filter(|&&p| p != 1).count();
+    // Count non-paper pixels remaining (index 0 is paper)
+    let remaining: usize = indices.iter().filter(|&&p| p != 0).count();
     panic!(
         "aging did not converge to all-paper within {max_steps} steps; \
          {remaining}/{initial_non_paper} non-paper pixels remain"
@@ -101,12 +105,12 @@ fn aging_reduces_file_size_over_many_steps() {
     let h = 128usize;
     let palette = Palette::default();
 
-    // Dense canvas with several thick strokes
+    // Dense canvas with several thick strokes (ink = index 1 in v0.4+)
     let mut indices = all_paper(w, h);
     for y in 16..112 {
         for x in 16..112 {
             if x < 48 || y < 48 || x > 80 || y > 80 {
-                indices[y * w + x] = 0; // ink border region
+                indices[y * w + x] = 1; // ink border region
             }
         }
     }
@@ -131,13 +135,15 @@ fn checkerboard_converges_to_all_paper() {
     let h = 64usize;
     let palette = Palette::default();
 
+    // Checkerboard with ink (1) and paper (0) in v0.4+ format
     let mut indices: Vec<u8> = (0..w * h)
-        .map(|i| if (i % w + i / w) % 2 == 0 { 0 } else { 1 })
+        .map(|i| if (i % w + i / w) % 2 == 0 { 1 } else { 0 })
         .collect();
 
     for step in 1..=200 {
         indices = age_step(&indices, w, h);
-        if indices.iter().all(|&p| p == 1) {
+        // Check for all paper (index 0 in v0.4+)
+        if indices.iter().all(|&p| p == 0) {
             let size = encoded_size(&indices, w, h, &palette);
             let ap   = encoded_size(&all_paper(w, h), w, h, &palette);
             assert_eq!(size, ap, "checkerboard converged at step {step} but size wrong");
@@ -153,11 +159,12 @@ fn single_pixel_erased_in_one_step() {
     let w = 32usize;
     let h = 32usize;
     let mut indices = all_paper(w, h);
-    indices[16 * w + 16] = 0;
+    // Single ink pixel (index 1) in v0.4+ format
+    indices[16 * w + 16] = 1;
 
     let aged = age_step(&indices, w, h);
     assert!(
-        aged.iter().all(|&p| p == 1),
+        aged.iter().all(|&p| p == 0),
         "a single isolated pixel should be erased in one step"
     );
 }
@@ -168,15 +175,16 @@ fn aging_never_introduces_non_paper() {
     let w = 64usize;
     let h = 64usize;
     let mut indices = all_paper(w, h);
-    // Sparse ink marks
+    // Sparse ink marks (index 1) in v0.4+ format
     for i in (0..w * h).step_by(7) {
-        indices[i] = 0;
+        indices[i] = 1;
     }
 
     for _ in 0..20 {
-        let before_non_paper: usize = indices.iter().filter(|&&p| p != 1).count();
+        // Count non-paper pixels (anything other than index 0)
+        let before_non_paper: usize = indices.iter().filter(|&&p| p != 0).count();
         indices = age_step(&indices, w, h);
-        let after_non_paper: usize = indices.iter().filter(|&&p| p != 1).count();
+        let after_non_paper: usize = indices.iter().filter(|&&p| p != 0).count();
         assert!(
             after_non_paper <= before_non_paper,
             "age_step introduced non-paper pixels: {after_non_paper} > {before_non_paper}"

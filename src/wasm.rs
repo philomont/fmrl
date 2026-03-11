@@ -102,7 +102,7 @@ pub fn decode_to_indices(data: &[u8]) -> Result<Vec<u8>, JsValue> {
     let decoded = decode(data).map_err(|e| JsValue::from_str(&e.to_string()))?;
     let w = decoded.ihdr.width as usize;
     let h = decoded.ihdr.height as usize;
-    let mut indices = vec![1u8; w * h]; // default to paper
+    let mut indices = vec![0u8; w * h]; // default to paper (index 0 in v0.4+)
 
     match decoded.ihdr.color_mode {
         ColorMode::Indexed => {
@@ -169,7 +169,7 @@ pub fn decode_to_rgba(data: &[u8]) -> Result<Vec<u8>, JsValue> {
                     let dst_x = tx * TILE_SIZE;
                     for px in 0..TILE_SIZE {
                         let idx = tile_indices[py * TILE_SIZE + px] as usize;
-                        let [r, g, b] = palette.0[idx.min(3)];
+                        let [r, g, b] = palette.0[idx.min(crate::format::PALETTE_SIZE - 1)];
                         let dst_base = (dst_y * w + dst_x + px) * 4;
                         rgba[dst_base] = r;
                         rgba[dst_base + 1] = g;
@@ -200,27 +200,25 @@ pub fn decode_to_rgba(data: &[u8]) -> Result<Vec<u8>, JsValue> {
 }
 
 /// Quantize an RGBA value to palette index using alpha + grayscale mapping.
-/// Matches the logic in encode.rs quantize_pixel.
+/// Matches the logic in encode.rs quantize_pixel for v0.4+ 16-color format.
 fn quantize_to_palette(r: u8, g: u8, b: u8, a: u8) -> u8 {
-    // Transparent pixels are paper (index 1)
+    use crate::format::PALETTE_SIZE;
+
+    // Transparent pixels are paper (index 0 in v0.4+)
     if a < 128 {
-        return 1;
+        return 0;
     }
 
     // Use brightness for grayscale mapping
     let brightness = (r as u16 + g as u16 + b as u16) / 3;
 
-    // Direct mapping based on brightness thresholds:
-    // 0-63   → ink (black)
-    // 64-191 → highlight (gray)
-    // 192+   → accent (white)
-    if brightness < 64 {
-        0 // ink - black
-    } else if brightness > 191 {
-        2 // accent - white
-    } else {
-        3 // highlight - gray
-    }
+    // Map brightness (0-255) to color indices 1-15
+    // Index 1 = black (darkest)
+    // Index 15 = almost-white (lightest non-paper)
+    let color_count = PALETTE_SIZE - 1; // 15 colors
+    let step = 256 / color_count as u16; // ~17 per step
+    let color_idx = ((brightness / step).min(color_count as u16 - 1) + 1) as u8;
+    color_idx
 }
 
 /// Apply one aging step to flat palette indices and return the result.
@@ -242,31 +240,31 @@ pub fn create_demo_fmrl() -> Result<Vec<u8>, JsValue> {
     let palette = Palette::default();
     let mut pixels = vec![0u8; w as usize * h as usize * 4];
 
-    // Background: aged paper
-    fill_all(&mut pixels, w, h, &palette, 1);
+    // Background: aged paper (index 0 in v0.4+)
+    fill_all(&mut pixels, w, h, &palette, 0);
 
-    // Outer border, 2px thick, 8px inset
+    // Outer border, 2px thick, 8px inset (ink = index 1)
     for t in 0..2u16 {
-        hline(&mut pixels, w, 8 + t, 8, w - 16, &palette, 0);
-        hline(&mut pixels, w, h - 9 - t, 8, w - 16, &palette, 0);
-        vline(&mut pixels, w, 8, 8 + t, h - 16, &palette, 0);
-        vline(&mut pixels, w, w - 9, 8 + t, h - 16, &palette, 0);
+        hline(&mut pixels, w, 8 + t, 8, w - 16, &palette, 1);
+        hline(&mut pixels, w, h - 9 - t, 8, w - 16, &palette, 1);
+        vline(&mut pixels, w, 8, 8 + t, h - 16, &palette, 1);
+        vline(&mut pixels, w, w - 9, 8 + t, h - 16, &palette, 1);
     }
 
-    // Accent margin line (2px wide at x=27)
-    vline(&mut pixels, w, 27, 12, h - 24, &palette, 2);
-    vline(&mut pixels, w, 28, 12, h - 24, &palette, 2);
+    // Accent margin line (2px wide at x=27) - use a lighter shade (index 8)
+    vline(&mut pixels, w, 27, 12, h - 24, &palette, 8);
+    vline(&mut pixels, w, 28, 12, h - 24, &palette, 8);
 
-    // Horizontal manuscript lines every 12px in ink
+    // Horizontal manuscript lines every 12px in ink (index 1)
     let mut y = 26u16;
     while y < h - 18 {
-        hline(&mut pixels, w, y, 32, w - 44, &palette, 0);
+        hline(&mut pixels, w, y, 32, w - 44, &palette, 1);
         y += 12;
     }
 
-    // Small accent ink blots (3×3)
+    // Small accent ink blots (3×3) - use index 5 (mid-gray)
     for &(bx, by) in &[(48u16, 25u16), (76, 49), (60, 73), (92, 97), (44, 101)] {
-        filled_rect(&mut pixels, w, bx, by, 3, 3, &palette, 2);
+        filled_rect(&mut pixels, w, bx, by, 3, 3, &palette, 5);
     }
 
     // Pre-age 20 days so decay is visible on first load
