@@ -467,9 +467,10 @@ function applyAge(n = 1) {
     try {
         // Age by encoding then decoding - aging happens during encode
         // Age levels persist through the cycle
-        let rgba = indicesToGrayscaleRgba(indices);
-
         for (let i = 0; i < n; i++) {
+            // Convert current indices to RGBA for encoding
+            const rgba = indicesToGrayscaleRgba(indices);
+
             // Encode with current age type and existing age levels
             const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
             const bytes = encode_rgba_with_age_and_levels(rgba, W, H, currentAgeType, ageLevelsArray);
@@ -480,20 +481,7 @@ function applyAge(n = 1) {
             view.free();
 
             // Decode back to indices (display only)
-            const newIndices = decode_to_indices(bytes);
-
-            // Update rgba for next iteration
-            rgba = new Uint8Array(newIndices.length * 4);
-            for (let j = 0; j < newIndices.length; j++) {
-                const b = indexToBrightness(newIndices[j]);
-                rgba[j * 4] = b;
-                rgba[j * 4 + 1] = b;
-                rgba[j * 4 + 2] = b;
-                rgba[j * 4 + 3] = 255;
-            }
-
-            // Use new indices for next iteration
-            indices = new Uint8Array(newIndices);
+            indices = new Uint8Array(decode_to_indices(bytes));
         }
 
         render();
@@ -504,12 +492,11 @@ function applyAge(n = 1) {
 }
 
 // Convert palette index to grayscale brightness
+// DEPRECATED: Use indicesToGrayscaleRgba instead
 function indexToBrightness(idx) {
-    // Match the brightness ranges used for quantization
-    // Index 0 = paper (255), 1 = 0-16 range (use 8), etc.
-    if (idx === 0) return 255;
-    const colorCount = 15; // indices 1-15
-    const step = 256 / colorCount;
+    // Just a fallback - proper conversion needs alpha handling
+    if (idx === 0) return 0;
+    const step = 256 / 15;
     return Math.min(255, Math.round((idx - 1) * step + step / 2));
 }
 
