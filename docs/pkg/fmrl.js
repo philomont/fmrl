@@ -27,6 +27,14 @@ export class FmrlView {
         return ret;
     }
     /**
+     * Returns the color mode: 3 = indexed, 6 = RGBA
+     * @returns {number}
+     */
+    color_mode() {
+        const ret = wasm.fmrlview_color_mode(this.__wbg_ptr);
+        return ret;
+    }
+    /**
      * Decode and apply decay. Returns RGBA pixels. Also mutates file_bytes.
      * @returns {Uint8Array}
      */
@@ -55,6 +63,14 @@ export class FmrlView {
     height() {
         const ret = wasm.fmrlview_height(this.__wbg_ptr);
         return ret;
+    }
+    /**
+     * Returns true if this file uses RGBA mode
+     * @returns {boolean}
+     */
+    is_rgba() {
+        const ret = wasm.fmrlview_is_rgba(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
      * last_view timestamp (ms since Unix epoch) from tile 0. Returns f64 for JS compatibility.
@@ -133,6 +149,9 @@ export function create_demo_fmrl() {
 /**
  * Decode a .fmrl file and return flat palette indices (0–3), row-major, width×height bytes.
  * Does not apply decay and does not mutate the file — intended for loading into an editor.
+ *
+ * Note: For RGBA mode files, this converts RGBA back to indices via quantization.
+ * Use `decode_to_rgba` to get raw RGBA data for RGBA mode files.
  * @param {Uint8Array} data
  * @returns {Uint8Array}
  */
@@ -149,7 +168,26 @@ export function decode_to_indices(data) {
 }
 
 /**
- * Encode raw RGBA pixels into a new .fmrl file using the default palette.
+ * Decode a .fmrl file and return raw RGBA pixels.
+ * For indexed mode, this expands palette colors to RGBA.
+ * For RGBA mode, this returns the original RGBA data.
+ * @param {Uint8Array} data
+ * @returns {Uint8Array}
+ */
+export function decode_to_rgba(data) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.decode_to_rgba(ptr0, len0);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Encode raw RGBA pixels into a new .fmrl file using indexed mode (palette quantization).
  * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
  * @param {Uint8Array} rgba
  * @param {number} width
@@ -160,6 +198,26 @@ export function encode_rgba(rgba, width, height) {
     const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.encode_rgba(ptr0, len0, width, height);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
+
+/**
+ * Encode raw RGBA pixels into a new .fmrl file using full RGBA mode (no palette quantization).
+ * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8Array}
+ */
+export function encode_rgba_full(rgba, width, height) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.encode_rgba_full(ptr0, len0, width, height);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }

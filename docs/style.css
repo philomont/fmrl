@@ -7,19 +7,82 @@
 }
 
 :root {
-  --bg:        #12100d;
-  --surface:   #1c1912;
-  --border:    #2c2820;
-  --text:      #c6ba9a;
-  --text-dim:  #6e6650;
-  --accent:    #9a0f0f;
-  --accent-hi: #c02020;
-  --bright:    #ece3c4;
-  --paper:     #e6dcc3;
+  /* ── Default (Aged Parchment) ───────────────────────── */
+  --bg:        #222222;
+  --surface:   #2a2a2a;
+  --border:    #333333;
+  --text:      #f5f3e3;
+  --text-dim:  #888888;
+  --bright:    #faf3e1;
+  --paper:     #faf3e1;
+  --ink:       #222222;
+  --accent:    #ff6d1f;
+  --accent-hi: #ff8c42;
+  --highlight:     #f5e7c6;
   --mono:      'Courier New', Courier, monospace;
   --sans:      system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
   --bar-h:     42px;
   --tray-w:    320px;
+}
+
+/* ── Retro (80s Terminal) ─────────────────────────────── */
+[data-theme="retro"] {
+  --bg:        #10385c;
+  --surface:   #163d60;
+  --border:    #1d4568;
+  --text:      #7ee787;
+  --text-dim:  #3fb950;
+  --bright:    #f4f6ff;
+  --paper:     #f4f6ff;
+  --ink:       #10385c;
+  --accent:    #eb8317;
+  --accent-hi: #f5a623;
+  --highlight:     #f3c623;
+}
+
+/* ── Vintage (Spring Pastels) ───────────────────────── */
+[data-theme="vintage"] {
+  --bg:        #89986d;
+  --surface:   #8f9e73;
+  --border:    #95a479;
+  --text:      #f6f0d7;
+  --text-dim:  #a89482;
+  --bright:    #f6f0d7;
+  --paper:     #f6f0d7;
+  --ink:       #89986d;
+  --accent:    #9cab84;
+  --accent-hi: #a5b48b;
+  --highlight:     #c5d89d;
+}
+
+/* ── Neon (Cyberpunk) ────────────────────────────────── */
+[data-theme="neon"] {
+  --bg:        #362f4f;
+  --surface:   #3d3656;
+  --border:    #443d5d;
+  --text:      #e4ff30;
+  --text-dim:  #cdd6f4;
+  --bright:    #ffffff;
+  --paper:     #362f4f;
+  --ink:       #e4ff30;
+  --accent:    #008bff;
+  --accent-hi: #4da8ff;
+  --highlight:     #5b23ff;
+}
+
+/* ── Zen (Minimal Light) ──────────────────────────────── */
+[data-theme="zen"] {
+  --bg:        #cfcfcf;
+  --surface:   #d9d9d9;
+  --border:    #e0e0e0;
+  --text:      #333333;
+  --text-dim:  #666666;
+  --bright:    #000000;
+  --paper:     #cfcfcf;
+  --ink:       #7f7f7f;
+  --accent:    #7f967f;
+  --accent-hi: #8fa88f;
+  --highlight:     #967f7f;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -92,25 +155,20 @@ html, body {
 .swatch {
   width: 2rem;
   height: 2rem;
-  background: var(--c, #000);
   border: 2px solid var(--border);
   cursor: pointer;
   position: relative;
-  transition: border-color 0.1s, transform 0.1s;
+  transition: border-color 0.1s, transform 0.1s, background-color 0.2s;
   flex-shrink: 0;
 }
 .swatch.active  { border-color: var(--bright); transform: scale(1.12); }
-.swatch.eraser  { background: var(--paper); border-style: dashed; }
-.swatch.eraser::after {
-  content: '✕';
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.65rem;
-  color: var(--text-dim);
-}
+
+/* Swatch colors are set via inline styles in JS to override theme CSS */
+/* Order: Ink (0), Accent (2), Highlight (3), Paper (1) */
+.swatch[data-idx="0"] { background: var(--ink); }
+.swatch[data-idx="2"] { background: var(--accent); }
+.swatch[data-idx="3"] { background: var(--highlight); }
+.swatch[data-idx="1"] { background: var(--paper); }
 
 /* ── Brush / text-tool buttons ──────────────────── */
 .brush-btn {
@@ -128,6 +186,15 @@ html, body {
   flex-shrink: 0;
 }
 .brush-btn.active { border-color: var(--bright); color: var(--bright); }
+
+/* Color editor tool button - SVG icon */
+#tool-colors svg {
+  display: block;
+}
+#tool-colors.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* ── Action bar (bottom strip) ──────────────────── */
 .action-bar {
@@ -210,6 +277,94 @@ html, body {
   color: var(--text-dim);
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* Theme selector */
+#theme-select {
+  appearance: none;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0.3rem 0.5rem;
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  cursor: pointer;
+  min-width: 80px;
+}
+#theme-select:hover {
+  border-color: var(--text-dim);
+}
+#theme-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+#theme-select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* Color picker panel - floating above action bar */
+.color-picker-panel {
+  position: fixed;
+  bottom: calc(var(--bar-h) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  z-index: 100;
+  display: none;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+}
+
+.color-picker-panel.visible {
+  display: block;
+}
+
+.color-picker-row {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.color-picker-row label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.color-picker {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 2px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.color-picker::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 0;
+}
+
+.color-picker::-moz-color-swatch {
+  border: none;
+  border-radius: 0;
+}
+
+.color-picker:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Load button — hidden file input overlays it */
@@ -349,6 +504,21 @@ code {
     margin: 0 0.1rem;
   }
   .action-bar { padding-left: 0.5rem; }
+  /* Mobile color picker panel */
+  .color-picker-panel {
+    bottom: calc(var(--bar-h) + 8px);
+    padding: 0.5rem;
+  }
+  .color-picker-row {
+    gap: 0.75rem;
+  }
+  .color-picker-row label {
+    font-size: 0.65rem;
+  }
+  .color-picker {
+    width: 2rem;
+    height: 2rem;
+  }
   .tray {
     top: auto;
     left: 0;

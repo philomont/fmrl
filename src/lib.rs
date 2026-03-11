@@ -13,7 +13,7 @@ pub use age::age_step;
 pub use decode::{DecodedFmrl, TileData, decode, patch_age_chunk};
 pub use encode::{FmrlImage, encode};
 pub use error::FmrlError;
-pub use format::{Palette, AgeEntry};
+pub use format::{ColorMode, Palette, AgeEntry};
 
 use format::TILE_SIZE;
 
@@ -49,6 +49,7 @@ pub fn render(
     let w = decoded.ihdr.width as usize;
     let h = decoded.ihdr.height as usize;
     let decay_policy = decoded.ihdr.decay_policy;
+    let color_mode = decoded.ihdr.color_mode;
 
     let mut rgba = vec![0u8; w * h * 4];
 
@@ -64,6 +65,7 @@ pub fn render(
             &decoded.palette,
             now_ms,
             decay_policy,
+            color_mode,
         );
 
         // Blit tile pixels into output buffer

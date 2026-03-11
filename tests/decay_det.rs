@@ -15,7 +15,9 @@ fn test_image() -> FmrlImage {
             pixels.extend_from_slice(&[r, g, b, 255]);
         }
     }
-    FmrlImage { width: 64, height: 64, palette, pixels, decay_policy: 0, meta: None }
+    let mut image = FmrlImage::new(64, 64, pixels);
+    image.palette = palette;
+    image
 }
 
 #[test]

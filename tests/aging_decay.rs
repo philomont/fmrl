@@ -18,14 +18,8 @@ fn indices_to_rgba(indices: &[u8], palette: &Palette) -> Vec<u8> {
 
 fn encoded_size(indices: &[u8], width: usize, height: usize, palette: &Palette) -> usize {
     let rgba = indices_to_rgba(indices, palette);
-    let img = FmrlImage {
-        width:        width as u16,
-        height:       height as u16,
-        palette:      palette.clone(),
-        pixels:       rgba,
-        decay_policy: 0,
-        meta:         None,
-    };
+    let mut img = FmrlImage::new(width as u16, height as u16, rgba);
+    img.palette = palette.clone();
     encode(&img, 0).expect("encode failed").len()
 }
 

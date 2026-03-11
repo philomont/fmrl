@@ -1,0 +1,223 @@
+# FMRL Configuration File
+# Fragile Manuscript Record Layer - Adjustable Parameters
+#
+# This file contains all configurable parameters for the FMRL codec.
+# Modify values here to customize encoding, decoding, and decay behavior.
+
+# =============================================================================
+# FILE FORMAT SETTINGS
+# =============================================================================
+
+[format]
+# Tile size in pixels (must be power of 2, typically 32)
+# Smaller tiles = more granular decay but larger file sizes
+# Larger tiles = less granular decay but smaller file sizes
+tile_size = 32
+
+# Maximum image dimensions (in pixels)
+# FMRL uses u16 for dimensions, so max is 65535
+# However, practical limits are lower for memory reasons
+max_width = 65504
+max_height = 65504
+
+# =============================================================================
+# COLOR & PALETTE SETTINGS
+# =============================================================================
+
+[color]
+# Color mode: "indexed" (4-color palette) or "rgba" (full 8-bit + alpha)
+# - "indexed": Classic FMRL mode with 4-color palette (smaller files)
+# - "rgba": Full 8-bit RGB color with alpha transparency (larger files)
+mode = "rgba"
+
+# Default palette for indexed mode (4 colors, RGB format)
+# Index 0: Ink/stroke color
+# Index 1: Paper/background color (this is the "fade to" color)
+# Index 2: Accent color
+# Index 3: Highlight color
+palette_ink = [0, 0, 0]           # Black
+palette_paper = [230, 220, 195]   # Aged paper
+palette_accent = [180, 30, 30]    # Accent
+palette_highlight = [255, 255, 255] # White
+
+# =============================================================================
+# THEME PALETTES (for web demo)
+# =============================================================================
+# Each theme defines the 4 UI colors: ink, paper, accent, highlight
+# These are used by the web demo's theme selector
+
+[themes.default]
+name = "Aged Parchment"
+ink = [34, 34, 34]          # rgb(34, 34, 34)
+paper = [250, 243, 225]     # rgb(250, 243, 225)
+accent = [255, 109, 31]      # rgb(255, 109, 31)
+highlight = [245, 231, 198] # rgb(245, 231, 198)
+
+[themes.retro]
+name = "80s Terminal"
+ink = [16, 55, 92]          # rgb(16, 55, 92)
+paper = [244, 246, 255]     # rgb(244, 246, 255)
+accent = [235, 131, 23]      # rgb(235, 131, 23)
+highlight = [243, 198, 35]   # rgb(243, 198, 35)
+
+[themes.vintage]
+name = "Spring Pastels"
+ink = [137, 152, 109]          # rgb(137, 152, 109)
+paper = [246, 240, 215]     # rgb(246, 240, 215)
+accent = [156, 171, 132]        # rgb(156, 171, 132)
+highlight = [197, 216, 157] # rgb(197, 216, 157)
+
+[themes.neon]
+name = "Cyberpunk"
+ink = [228, 255, 48]     # rgb(228, 255, 48)
+paper = [54, 47, 79]     # rgb(54, 47, 79)
+accent = [0, 139, 255]      # rgb(0, 139, 255)
+highlight = [91, 35, 255] # rgb(91, 35, 255)
+
+[themes.zen]
+name = "Minimal Light"
+ink = [127, 127, 127]     # rgb(127, 127, 127)
+paper = [207, 207, 207]     # rgb(207, 207, 207)
+accent = [127, 150, 127]      # rgb(127, 150, 127)
+highlight = [150, 127, 127] # rgb(150, 127, 127)
+
+# Default transparency for new images (0-255, where 0 = fully transparent)
+# When mode = "rgba", new images start with this alpha value
+# Default: 0 (fully transparent, showing only paper background)
+default_alpha = 0
+
+# Paper color for RGBA mode (used as fade target and background)
+# This is the color that pixels fade toward as they decay
+paper_color = [230, 220, 195]
+
+# =============================================================================
+# ENCODING SETTINGS
+# =============================================================================
+
+[encoding]
+# Compression level for zlib (0-9, where 9 = best compression, 0 = none)
+# Higher = smaller files but slower encoding
+# Lower = faster encoding but larger files
+compression_level = 6
+
+# Whether to store original stroke data in ORIG chunk
+# This allows for reconstruction but increases file size
+store_original = false
+
+# Default decay policy for new images
+# 0 = Ink-aware (ink-heavy tiles fade faster)
+# 1 = Uniform (all tiles fade at same rate)
+default_decay_policy = 0
+
+# =============================================================================
+# DECAY SETTINGS
+# =============================================================================
+
+[decay]
+# Base decay period in days
+# After this many days, a tile reaches maximum fade
+# Default: 30 days
+base_decay_days = 30
+
+# Whether to apply temporal decay (age since creation)
+enable_temporal_decay = true
+
+# Whether to apply usage-based decay (per-tile view tracking)
+enable_usage_decay = true
+
+# Maximum fade level (0-255)
+# Higher values allow more gradual decay
+max_fade_level = 255
+
+# Edge damage increment per view (0-100 scale)
+# How much edge erosion accumulates each time the image is viewed
+edge_damage_per_view = 1
+
+# =============================================================================
+# DECAY POLICY 0 (INK-AWARE) SETTINGS
+# =============================================================================
+
+[decay.ink_aware]
+# Fade multiplier for ink-heavy tiles (>50% ink pixels)
+ink_heavy_multiplier = 1.5
+
+# Fade multiplier for background/light tiles
+light_tile_multiplier = 0.5
+
+# Threshold for considering a tile "ink-heavy" (0.0 - 1.0)
+ink_ratio_threshold = 0.5
+
+# =============================================================================
+# RENDERING SETTINGS
+# =============================================================================
+
+[render]
+# Enable edge erosion effect
+# Pixels at stroke edges may randomly convert to paper
+enable_edge_erosion = true
+
+# Enable noise injection
+# Adds subtle Perlin-like noise based on tile's noise_seed
+enable_noise = true
+
+# Noise intensity (0.0 - 1.0)
+noise_intensity = 0.1
+
+# =============================================================================
+# AGING ALGORITHM SETTINGS (age_step)
+# =============================================================================
+
+[aging]
+# Run threshold for short-run elimination
+# Runs of non-paper pixels this length or shorter become paper
+# Higher values = more aggressive aging
+run_threshold = 2
+
+# Erosion threshold (number of paper neighbors)
+# Non-paper pixels with at least this many paper neighbors become paper
+# Range: 0-8 (8-connected neighborhood)
+erosion_threshold = 3
+
+# =============================================================================
+# PRNG SETTINGS
+# =============================================================================
+
+[prng]
+# Algorithm for tile-based random number generation
+# Currently only "xoshiro128++" is supported
+algorithm = "xoshiro128++"
+
+# Seed mixing constant (splitmix32)
+# Advanced: only change if you need different noise patterns
+splitmix_constant = "0x9e3779b97f4a7c15"
+
+# =============================================================================
+# WASM/DEMO SETTINGS
+# =============================================================================
+
+[wasm]
+# Demo image dimensions (must be multiples of tile_size)
+demo_width = 128
+demo_height = 128
+
+# Pre-age demo images by this many days (for immediate decay visibility)
+demo_pre_age_days = 20
+
+# Default demo metadata
+demo_title = "FMRL Demo"
+demo_tags = ["manuscript", "decay", "demo"]
+
+# =============================================================================
+# DEVELOPMENT/TESTING SETTINGS
+# =============================================================================
+
+[dev]
+# Enable deterministic mode for testing
+# When enabled, decay uses fixed seeds for reproducible results
+deterministic_mode = false
+
+# Fixed seed for deterministic mode (used when deterministic_mode = true)
+test_seed = 12345
+
+# Enable verbose logging
+verbose = false
