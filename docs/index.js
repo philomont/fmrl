@@ -1,4 +1,4 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, decode_to_indices, age_step_indices, consolidation_step_indices } from './pkg/fmrl.js';
+import init, { FmrlView, encode_rgba, encode_rgba_with_age, decode_to_indices } from './pkg/fmrl.js';
 
 // Age type: 0 = erosion (default), 1 = consolidation
 let currentAgeType = 0;
@@ -460,177 +460,40 @@ function _doAgeStep(src, full = true) {
     return next;
 }
 
-// Track consolidation level per tile (simulates AGE layer fade_level)
-let tileConsolidationLevels = null;
-
-// Initialize consolidation tracking for current canvas size
-function initConsolidationTracking() {
-    const tilesX = W / 32;
-    const tilesY = H / 32;
-    tileConsolidationLevels = new Uint8Array(tilesX * tilesY);
-}
-
-// _doConsolidationStep(src):
-//   Progressive consolidation based on "age" (times consolidated).
-//   Block size increases with age: 2x2 → 4x4 → 8x8 → full tile (paper).
-//   Starts from tiles with content (non-paper), not from top-left.
-function _doConsolidationStep(src) {
-    const w = W, h = H;
-    const tilesX = w / 32;
-    const tilesY = h / 32;
-
-    // Initialize tracking if needed
-    if (!tileConsolidationLevels || tileConsolidationLevels.length !== tilesX * tilesY) {
-        initConsolidationTracking();
-    }
-
-    // First: identify tiles with content (non-paper pixels)
-    const tileHasContent = new Uint8Array(tilesX * tilesY);
-    for (let ty = 0; ty < tilesY; ty++) {
-        for (let tx = 0; tx < tilesX; tx++) {
-            const tx0 = tx * 32;
-            const ty0 = ty * 32;
-            let hasContent = false;
-            for (let y = 0; y < 32 && !hasContent; y++) {
-                for (let x = 0; x < 32; x++) {
-                    if (src[(ty0 + y) * w + (tx0 + x)] !== 0) {
-                        hasContent = true;
-                        break;
-                    }
-                }
-            }
-            tileHasContent[ty * tilesX + tx] = hasContent ? 1 : 0;
-        }
-    }
-
-    const result = new Uint8Array(w * h);
-
-    // Process tiles: content tiles age first, empty tiles age slower
-    for (let ty = 0; ty < tilesY; ty++) {
-        for (let tx = 0; tx < tilesX; tx++) {
-            const tileIdx = ty * tilesX + tx;
-            const hasContent = tileHasContent[tileIdx] === 1;
-
-            // Empty tiles age at half speed (skip every other step)
-            if (!hasContent && tileConsolidationLevels[tileIdx] % 2 === 0) {
-                // Copy unchanged
-                const tx0 = tx * 32;
-                const ty0 = ty * 32;
-                for (let y = 0; y < 32; y++) {
-                    for (let x = 0; x < 32; x++) {
-                        result[(ty0 + y) * w + (tx0 + x)] = src[(ty0 + y) * w + (tx0 + x)];
-                    }
-                }
-                tileConsolidationLevels[tileIdx]++;
-                continue;
-            }
-
-            let age = tileConsolidationLevels[tileIdx];
-
-            // Determine block size based on age
-            let blockSize;
-            if (age >= 6) {
-                blockSize = 32; // Full tile -> paper
-            } else if (age >= 4) {
-                blockSize = 8;
-            } else if (age >= 2) {
-                blockSize = 4;
-            } else {
-                blockSize = 2;
-            }
-
-            const tx0 = tx * 32;
-            const ty0 = ty * 32;
-
-            if (blockSize === 32) {
-                // Full tile becomes paper (index 0)
-                for (let y = 0; y < 32; y++) {
-                    for (let x = 0; x < 32; x++) {
-                        result[(ty0 + y) * w + (tx0 + x)] = 0;
-                    }
-                }
-            } else {
-                // Consolidate at blockSize resolution
-                const blocksPerTile = 32 / blockSize;
-                for (let by = 0; by < blocksPerTile; by++) {
-                    for (let bx = 0; bx < blocksPerTile; bx++) {
-                        const pixels = [];
-                        const y0 = ty0 + by * blockSize;
-                        const x0 = tx0 + bx * blockSize;
-                        for (let y = 0; y < blockSize; y++) {
-                            for (let x = 0; x < blockSize; x++) {
-                                pixels.push(src[(y0 + y) * w + (x0 + x)]);
-                            }
-                        }
-                        const c = mostCommonIndexN(pixels);
-                        for (let y = 0; y < blockSize; y++) {
-                            for (let x = 0; x < blockSize; x++) {
-                                result[(y0 + y) * w + (x0 + x)] = c;
-                            }
-                        }
-                    }
-                }
-            }
-
-            tileConsolidationLevels[tileIdx] = Math.min(age + 1, 255);
-        }
-    }
-
-    return result;
-}
-
-// Find most common index in N values. Lowest index wins ties.
-function mostCommonIndexN(pixels) {
-    const counts = new Uint16Array(16);
-    for (const p of pixels) {
-        counts[p]++;
-    }
-
-    let bestIdx = 0;
-    let bestCount = counts[0];
-    for (let i = 1; i < 16; i++) {
-        if (counts[i] > bestCount) {
-            bestCount = counts[i];
-            bestIdx = i;
-        }
-    }
-    return bestIdx;
-}
-
-// Find most common index in 4 values. Lowest index wins ties.
-function mostCommonIndex(a, b, c, d) {
-    const counts = new Uint8Array(16);
-    counts[a]++;
-    counts[b]++;
-    counts[c]++;
-    counts[d]++;
-
-    let bestIdx = 0;
-    let bestCount = counts[0];
-    for (let i = 1; i < 16; i++) {
-        if (counts[i] > bestCount) {
-            bestCount = counts[i];
-            bestIdx = i;
-        }
-    }
-    return bestIdx;
-}
-
 function applyAge(n = 1) {
-    if (currentAgeType === 1) {
-        // Consolidation: progressive block sizes based on per-tile age
+    try {
+        // Age by encoding then decoding - aging happens during encode
+        const rgba = indicesToGrayscaleRgba(indices);
+
         for (let i = 0; i < n; i++) {
-            indices = _doConsolidationStep(indices);
+            // Encode with current age type (applies one aging step)
+            const bytes = encode_rgba_with_age(rgba, W, H, currentAgeType);
+            // Decode back to indices (display only)
+            const newIndices = decode_to_indices(bytes);
+            // Update rgba for next iteration
+            for (let j = 0; j < newIndices.length; j++) {
+                rgba[j * 4] = rgba[j * 4 + 1] = rgba[j * 4 + 2] = indexToBrightness(newIndices[j]);
+                rgba[j * 4 + 3] = 255;
+            }
+            // Use new indices for next iteration
+            indices = new Uint8Array(newIndices);
         }
-    } else {
-        // Erosion: also reset consolidation tracking
-        tileConsolidationLevels = null;
-        for (let i = 0; i < n; i++) {
-            indices = _doAgeStep(indices, true);
-        }
+
+        render();
+        updateMetric();
+    } catch (e) {
+        console.error('Age failed:', e);
     }
-    render();
-    updateMetric();
+}
+
+// Convert palette index to grayscale brightness
+function indexToBrightness(idx) {
+    // Match the brightness ranges used for quantization
+    // Index 0 = paper (255), 1 = 0-16 range (use 8), etc.
+    if (idx === 0) return 255;
+    const colorCount = 15; // indices 1-15
+    const step = 256 / colorCount;
+    return Math.min(255, Math.round((idx - 1) * step + step / 2));
 }
 
 // ── Compression metric ──────────────────────────────────────────────────────
@@ -728,15 +591,8 @@ function setPassiveAging(enabled) {
     const btn = document.getElementById('btn-passive');
     if (enabled) {
         passiveTimer = setInterval(() => {
-            // Age the base snapshot in sync so the cursor-blink restore doesn't
-            // revert the canvas to an un-aged state while text is being typed.
-            // Note: consolidation is always "full" (no partial mode)
-            const doStep = currentAgeType === 1 ? _doConsolidationStep : (src) => _doAgeStep(src, false);
-            if (textBaseIndices) textBaseIndices = doStep(textBaseIndices);
-            indices = doStep(indices);
-            if (textCursor) _blitText(textBuffer + (cursorBlink ? '|' : ''));
-            else render();
-            updateMetric();
+            // Apply one aging step via encode/decode
+            applyAge(1);
         }, passiveIntervalMs());
         btn.classList.add('active');
         btn.textContent = 'Auto  ON';
@@ -1038,7 +894,6 @@ function loadFmrl(arrayBuffer) {
         lastMetricSize = 0;
         blankSize = 0;
         updateMetric();
-        tileConsolidationLevels = null; // Reset consolidation tracking on load
     } catch (e) { alert(`Failed to load .fmrl: ${e}`); }
 }
 
@@ -1199,7 +1054,6 @@ async function main() {
     document.getElementById('btn-clear').addEventListener('click', () => {
         setTextMode(false);
         indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
-        tileConsolidationLevels = null; // Reset consolidation tracking
     });
     document.getElementById('btn-save').addEventListener('click', saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
