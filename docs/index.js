@@ -721,31 +721,52 @@ const STORAGE_PALETTE = [
 ];
 
 /// Convert indices to grayscale RGBA for encoding (theme-independent)
-/// v0.4+ format: explicit index-to-theme mapping for debug PNG
-/// 0 → paper (white), 1 → ink (black), 2 → accent (mid-gray), 15 → highlight (light-gray)
+/// v0.4+ format: Maps indices to brightness values that quantize back to same index.
+/// The codec quantizes: brightness 0-16→1, 17-33→2, ..., 240-255→15, alpha<128→0
+/// To get a specific index, we use the MIN brightness value for that index's range.
 function indicesToGrayscaleRgba(src = indices) {
     const rgba = new Uint8Array(W * H * 4);
+    // Brightness values that quantize to each index (using range minimums)
+    // Index 0: transparent (alpha < 128)
+    // Index 1: brightness 0-16 (use 8)
+    // Index 2: brightness 17-33 (use 17)
+    // ...
+    // Index 15: brightness 240-255 (use 240)
+    const brightnessMap = [
+        255,  // 0: paper - will use alpha=0, not this value
+        8,    // 1: ink - darkest (center of 0-16 range)
+        17,   // 2: accent start
+        34,   // 3
+        51,   // 4
+        68,   // 5
+        85,   // 6
+        102,  // 7
+        119,  // 8
+        136,  // 9
+        153,  // 10
+        170,  // 11
+        187,  // 12
+        204,  // 13
+        221,  // 14
+        240,  // 15: highlight
+    ];
+
     for (let i = 0; i < W * H; i++) {
         const idx = src[i];
-        let r, g, b;
-        // Explicit mapping: 0=paper, 1=ink, 2=accent, 15=highlight
         if (idx === 0) {
-            [r, g, b] = [255, 255, 255];      // paper - white
-        } else if (idx === 1) {
-            [r, g, b] = [0, 0, 0];            // ink - black
-        } else if (idx === 2) {
-            [r, g, b] = [119, 119, 119];      // accent - mid-gray
-        } else if (idx === 15) {
-            [r, g, b] = [238, 238, 238];      // highlight - light gray
+            // Paper: transparent (alpha < 128 triggers index 0 in quantize)
+            rgba[i * 4] = 255;
+            rgba[i * 4 + 1] = 255;
+            rgba[i * 4 + 2] = 255;
+            rgba[i * 4 + 3] = 0;  // transparent
         } else {
-            // Other indices: map to grayscale based on storage palette
-            [r, g, b] = STORAGE_PALETTE[idx];
+            // Non-paper: use brightness that quantizes to desired index
+            const gray = brightnessMap[idx] || 128;
+            rgba[i * 4] = gray;
+            rgba[i * 4 + 1] = gray;
+            rgba[i * 4 + 2] = gray;
+            rgba[i * 4 + 3] = 255;  // opaque
         }
-        rgba[i * 4] = r;
-        rgba[i * 4 + 1] = g;
-        rgba[i * 4 + 2] = b;
-        // Paper (index 0) is white in debug PNG (not transparent)
-        rgba[i * 4 + 3] = 255;  // fully opaque
     }
     return rgba;
 }
@@ -780,35 +801,35 @@ function saveDebugPng(fmrlBytes, width, height) {
         const ctx = debugCanvas.getContext('2d');
         const imgData = ctx.createImageData(width, height);
 
-        // v0.4+ grayscale palette (matches storage format, theme-independent):
-        // 0 = paper (white), 1 = ink (black), 2 = accent (mid-gray), 15 = highlight (light-gray)
+        // v0.4+ grayscale palette for debug display:
+        // Shows the brightness values that each index represents
         const grayscalePalette = [
-            [255, 255, 255],   // 0: paper - white
-            [0, 0, 0],         // 1: ink - black
-            [119, 119, 119],   // 2: accent - mid-gray
+            [255, 255, 255],   // 0: paper - white (but drawn as white for visibility)
+            [8, 8, 8],         // 1: ink - black
+            [17, 17, 17],      // 2: accent
             [34, 34, 34],      // 3
             [51, 51, 51],      // 4
             [68, 68, 68],      // 5
             [85, 85, 85],      // 6
             [102, 102, 102],   // 7
-            [136, 136, 136],   // 8
-            [153, 153, 153],   // 9
-            [170, 170, 170],   // 10
-            [187, 187, 187],   // 11
-            [204, 204, 204],   // 12
-            [221, 221, 221],   // 13
-            [238, 238, 238],   // 14
-            [238, 238, 238],   // 15: highlight - light gray
+            [119, 119, 119],   // 8
+            [136, 136, 136],   // 9
+            [153, 153, 153],   // 10
+            [170, 170, 170],   // 11
+            [187, 187, 187],   // 12
+            [204, 204, 204],   // 13
+            [221, 221, 221],   // 14
+            [240, 240, 240],   // 15: highlight - light gray
         ];
 
         for (let i = 0; i < width * height; i++) {
             const idx = decodedIndices[i];
-            const [r, g, b] = grayscalePalette[idx] || [255, 255, 255];
+            const [r, g, b] = grayscalePalette[idx] || [128, 128, 128];
             imgData.data[i * 4]     = r;
             imgData.data[i * 4 + 1] = g;
             imgData.data[i * 4 + 2] = b;
-            // Paper (index 0) is white in debug PNG
-            imgData.data[i * 4 + 3] = 255;  // fully opaque
+            // All pixels opaque in debug PNG
+            imgData.data[i * 4 + 3] = 255;
         }
         ctx.putImageData(imgData, 0, 0);
 
