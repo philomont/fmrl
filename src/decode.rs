@@ -230,8 +230,10 @@ fn parse_data_chunk_indexed(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, V
             let compressed = &data[pos..pos + comp_len];
             pos += comp_len;
 
-            let packed = zlib_decompress(compressed)?;
-            let indices = unpack_nibbles(&packed, pixel_count);
+            let indices = zlib_decompress(compressed)?;
+            if indices.len() != pixel_count {
+                return Err(FmrlError::MalformedChunk("tile indices size mismatch"));
+            }
 
             tiles.push(TileData {
                 tx: tx as u16,
