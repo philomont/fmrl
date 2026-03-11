@@ -14,13 +14,26 @@ function computeCanvasDims(srcW, srcH) {
     ];
 }
 
-// Default palette: ink, paper, accent, highlight
-// Matches themes.default in fmrl.toml
+// Default theme palette (maps to 16-color grayscale indices)
+// Index 0 = paper, 1 = ink, 2-15 = grayscale steps
+// Web app uses: 0 (paper), 1 (ink), 8 (accent), 15 (highlight)
 const PALETTE = [
-    [34, 34, 34],       // 0: ink
-    [250, 243, 225],   // 1: paper
-    [255, 109, 31],    // 2: accent (orange)
-    [245, 231, 198],   // 3: highlight
+    [250, 243, 225],   // 0: paper (white) - matches index 0
+    [34, 34, 34],      // 1: ink (black) - matches index 1
+    [250, 243, 225],   // 2: unused (maps to paper)
+    [250, 243, 225],   // 3: unused
+    [250, 243, 225],   // 4: unused
+    [250, 243, 225],   // 5: unused
+    [250, 243, 225],   // 6: unused
+    [250, 243, 225],   // 7: unused
+    [255, 109, 31],    // 8: accent (orange) - maps to mid-gray
+    [250, 243, 225],   // 9: unused
+    [250, 243, 225],   // 10: unused
+    [250, 243, 225],   // 11: unused
+    [250, 243, 225],   // 12: unused
+    [250, 243, 225],   // 13: unused
+    [250, 243, 225],   // 14: unused
+    [245, 231, 198],   // 15: highlight - maps to light gray
 ];
 
 // Alpha-based palette for file storage:
@@ -50,14 +63,15 @@ async function loadThemes() {
         if (!response.ok) throw new Error('Failed to load themes');
         const themes = await response.json();
 
-        // Convert object format to array format [ink, paper, accent, highlight]
+        // Convert object format to 16-color array format
+        // v0.4+ format: 0=paper, 1=ink, 2-7=unused, 8=accent, 9-14=unused, 15=highlight
         for (const [name, data] of Object.entries(themes)) {
-            THEME_PALETTES[name] = [
-                data.ink,
-                data.paper,
-                data.accent,
-                data.highlight,
-            ];
+            const palette = new Array(16).fill(data.paper); // default to paper
+            palette[0] = data.paper;  // paper (index 0)
+            palette[1] = data.ink;    // ink (index 1)
+            palette[8] = data.accent; // accent (index 8)
+            palette[15] = data.highlight; // highlight (index 15)
+            THEME_PALETTES[name] = palette;
         }
         console.log('Loaded themes:', Object.keys(THEME_PALETTES));
     } catch (e) {
@@ -85,7 +99,13 @@ function getThemePalette() {
     const paper = cssColorToRgb(root.getPropertyValue('--paper').trim());
     const accent = cssColorToRgb(root.getPropertyValue('--accent').trim());
     const highlight = cssColorToRgb(root.getPropertyValue('--highlight').trim());
-    return [ink, paper, accent, highlight];
+    // Build 16-color palette: 0=paper, 1=ink, 8=accent, 15=highlight, others=paper
+    const palette = new Array(16).fill(paper);
+    palette[0] = paper;
+    palette[1] = ink;
+    palette[8] = accent;
+    palette[15] = highlight;
+    return palette;
 }
 
 function cssColorToRgb(color) {
@@ -122,8 +142,12 @@ function rgbToHex(r, g, b) {
 function updateSwatchColors() {
     const palette = getThemePalette();
 
-    // palette: [ink, paper, accent, highlight]
-    const [ink, paper, accent, highlight] = palette;
+    // v0.4+ palette: 16 colors, indices 0-15
+    // Web app uses: 0=paper, 1=ink, 8=accent, 15=highlight
+    const paper = palette[0];
+    const ink = palette[1];
+    const accent = palette[8];
+    const highlight = palette[15];
     const inkRgb = `rgb(${ink[0]}, ${ink[1]}, ${ink[2]})`;
     const paperRgb = `rgb(${paper[0]}, ${paper[1]}, ${paper[2]})`;
     const accentRgb = `rgb(${accent[0]}, ${accent[1]}, ${accent[2]})`;
@@ -133,10 +157,10 @@ function updateSwatchColors() {
     const swatches = document.querySelectorAll('.swatch');
     swatches.forEach(swatch => {
         const idx = parseInt(swatch.dataset.idx, 10);
-        if (idx === 0) swatch.style.backgroundColor = inkRgb;
-        else if (idx === 1) swatch.style.backgroundColor = paperRgb;
-        else if (idx === 2) swatch.style.backgroundColor = accentRgb;
-        else if (idx === 3) swatch.style.backgroundColor = highlightRgb;
+        if (idx === 0) swatch.style.backgroundColor = paperRgb;
+        else if (idx === 1) swatch.style.backgroundColor = inkRgb;
+        else if (idx === 8) swatch.style.backgroundColor = accentRgb;
+        else if (idx === 15) swatch.style.backgroundColor = highlightRgb;
     });
 
     // Update color picker values if they exist
@@ -258,7 +282,7 @@ function initTheme() {
 // ── Drawing state ───────────────────────────────────────────────────────────
 
 let indices   = null;
-let colorIdx  = 0;
+let colorIdx  = 1;  // v0.4+: index 1 = ink (default drawing color)
 let brushSize = 2;   // matches first brush-btn data-size
 let drawing   = false;
 let lastX     = -1;
@@ -369,20 +393,22 @@ const RUN_THRESHOLD = 2;
 function _doAgeStep(src, full = true) {
     const next = src.slice();
     const w = W, h = H;
+    const PAPER = 0;  // v0.4+: index 0 is paper
 
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-            if (src[y * w + x] === 1) continue;
+            if (src[y * w + x] === PAPER) continue;
             let paperCount = 0;
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
                     if (dx === 0 && dy === 0) continue;
                     const nx = x + dx, ny = y + dy;
                     if (nx < 0 || nx >= w || ny < 0 || ny >= h ||
-                        src[ny * w + nx] === 1) paperCount++;
+                        src[ny * w + nx] === PAPER) paperCount++;
                 }
             }
-            if (paperCount >= 3) next[y * w + x] = 1;
+            // Require 4+ paper neighbors (matches Rust implementation)
+            if (paperCount >= 4) next[y * w + x] = PAPER;
         }
     }
 
@@ -390,11 +416,11 @@ function _doAgeStep(src, full = true) {
 
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; ) {
-            if (next[y * w + x] !== 1) {
+            if (next[y * w + x] !== PAPER) {
                 let e = x + 1;
-                while (e < w && next[y * w + e] !== 1) e++;
+                while (e < w && next[y * w + e] !== PAPER) e++;
                 if (e - x <= RUN_THRESHOLD)
-                    for (let rx = x; rx < e; rx++) next[y * w + rx] = 1;
+                    for (let rx = x; rx < e; rx++) next[y * w + rx] = PAPER;
                 x = e;
             } else { x++; }
         }
@@ -402,11 +428,11 @@ function _doAgeStep(src, full = true) {
 
     for (let x = 0; x < w; x++) {
         for (let y = 0; y < h; ) {
-            if (next[y * w + x] !== 1) {
+            if (next[y * w + x] !== PAPER) {
                 let e = y + 1;
-                while (e < h && next[e * w + x] !== 1) e++;
+                while (e < h && next[e * w + x] !== PAPER) e++;
                 if (e - y <= RUN_THRESHOLD)
-                    for (let ry = y; ry < e; ry++) next[ry * w + x] = 1;
+                    for (let ry = y; ry < e; ry++) next[ry * w + x] = PAPER;
                 y = e;
             } else { y++; }
         }
@@ -450,8 +476,8 @@ function formatBytes(bytes) {
 }
 
 function computeBlankSize() {
-    // Create all-paper indices (paper is always index 1)
-    const paperIndices = new Uint8Array(W * H).fill(1);
+    // Create all-paper indices (paper is index 0 in v0.4+)
+    const paperIndices = new Uint8Array(W * H).fill(0);
     // Use current palette for blank size calculation
     const palette = getThemePalette();
     const rgba = new Uint8Array(W * H * 4);
@@ -656,23 +682,39 @@ function _blitText(text) {
 // ── Save / Load ─────────────────────────────────────────────────────────────
 
 // Grayscale palette for encoding (theme-independent storage)
+// Matches Rust PALETTE_SIZE = 16, index 0 = paper (white/transparent)
+const PALETTE_SIZE = 16;
 const STORAGE_PALETTE = [
-    [0, 0, 0],         // 0: ink - black
-    [255, 255, 255],   // 1: paper - white (alpha=0 for transparent)
-    [255, 255, 255],   // 2: accent - white
-    [128, 128, 128],   // 3: highlight - gray
+    [255, 255, 255],   // 0: paper - white (alpha=0 for transparent)
+    [0, 0, 0],         // 1: ink - black
+    [17, 17, 17],      // 2: dark gray
+    [34, 34, 34],      // 3
+    [51, 51, 51],      // 4
+    [68, 68, 68],      // 5
+    [85, 85, 85],      // 6
+    [102, 102, 102],   // 7
+    [119, 119, 119],   // 8
+    [136, 136, 136],   // 9
+    [153, 153, 153],   // 10
+    [170, 170, 170],   // 11
+    [187, 187, 187],   // 12
+    [204, 204, 204],   // 13
+    [221, 221, 221],   // 14
+    [238, 238, 238],   // 15: lightest non-paper
 ];
 
 /// Convert indices to grayscale RGBA for encoding (theme-independent)
+/// Uses v0.4+ format: index 0 = paper (transparent), indices 1-15 = colors
 function indicesToGrayscaleRgba(src = indices) {
     const rgba = new Uint8Array(W * H * 4);
     for (let i = 0; i < W * H; i++) {
-        const [r, g, b] = STORAGE_PALETTE[src[i]];
+        const idx = src[i];
+        const [r, g, b] = STORAGE_PALETTE[idx];
         rgba[i * 4] = r;
         rgba[i * 4 + 1] = g;
         rgba[i * 4 + 2] = b;
-        // Paper (index 1) is transparent, others are opaque
-        rgba[i * 4 + 3] = src[i] === 1 ? 0 : 255;
+        // Paper (index 0) is transparent, others are opaque
+        rgba[i * 4 + 3] = idx === 0 ? 0 : 255;
     }
     return rgba;
 }
@@ -785,7 +827,7 @@ async function main() {
     [W, H] = computeCanvasDims(window.innerWidth, window.innerHeight);
     canvas.width  = W;
     canvas.height = H;
-    indices = new Uint8Array(W * H).fill(1);
+    indices = new Uint8Array(W * H).fill(0);  // v0.4+: paper = index 0
 
     document.fonts.load(`${textFontSize()}px "National Park"`).catch(() => {});
 
@@ -918,7 +960,7 @@ async function main() {
 
     document.getElementById('btn-clear').addEventListener('click', () => {
         setTextMode(false);
-        indices.fill(1); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
+        indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();  // v0.4+: paper = index 0
     });
     document.getElementById('btn-save').addEventListener('click', saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
