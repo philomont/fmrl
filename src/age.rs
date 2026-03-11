@@ -232,8 +232,26 @@ pub fn consolidation_step_with_age(
             }
         }
 
-        // Increment age level for this tile
-        age_levels[tile_idx] = age_levels[tile_idx].saturating_add(1);
+        // Check if tile became all paper after consolidation
+        let tx0 = tx * TILE_SIZE;
+        let ty0 = ty * TILE_SIZE;
+        let mut all_paper = true;
+        for y in 0..TILE_SIZE {
+            for x in 0..TILE_SIZE {
+                if result[(ty0 + y) * width + (tx0 + x)] != 0 {
+                    all_paper = false;
+                    break;
+                }
+            }
+            if !all_paper { break; }
+        }
+
+        // Reset age to 0 if all paper, otherwise increment
+        if all_paper {
+            age_levels[tile_idx] = 0;
+        } else {
+            age_levels[tile_idx] = age_levels[tile_idx].saturating_add(1);
+        }
     }
 
     result
