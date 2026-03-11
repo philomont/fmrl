@@ -655,10 +655,32 @@ function _blitText(text) {
 
 // ── Save / Load ─────────────────────────────────────────────────────────────
 
+// Grayscale palette for encoding (theme-independent storage)
+const STORAGE_PALETTE = [
+    [0, 0, 0],         // 0: ink - black
+    [255, 255, 255],   // 1: paper - white (alpha=0 for transparent)
+    [255, 255, 255],   // 2: accent - white
+    [128, 128, 128],   // 3: highlight - gray
+];
+
+/// Convert indices to grayscale RGBA for encoding (theme-independent)
+function indicesToGrayscaleRgba(src = indices) {
+    const rgba = new Uint8Array(W * H * 4);
+    for (let i = 0; i < W * H; i++) {
+        const [r, g, b] = STORAGE_PALETTE[src[i]];
+        rgba[i * 4] = r;
+        rgba[i * 4 + 1] = g;
+        rgba[i * 4 + 2] = b;
+        // Paper (index 1) is transparent, others are opaque
+        rgba[i * 4 + 3] = src[i] === 1 ? 0 : 255;
+    }
+    return rgba;
+}
+
 function saveFmrl() {
     try {
-        // Encode current canvas state (no aging during save)
-        const bytes = encode_rgba(indicesToRgba(indices), W, H);
+        // Encode current canvas state using grayscale (theme-independent storage)
+        const bytes = encode_rgba(indicesToGrayscaleRgba(indices), W, H);
 
         // Save FMRL file
         const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
