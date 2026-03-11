@@ -341,7 +341,23 @@ function render() {
     const imgData = ctx.createImageData(W, H);
     const palette = getThemePalette();
     for (let i = 0; i < W * H; i++) {
-        const [r, g, b] = palette[indices[i]];
+        const idx = indices[i];
+        // Explicit mapping for web app display:
+        // 0 → paper, 1 → ink, 2 → accent, 15 → highlight
+        let color;
+        if (idx === 0) {
+            color = palette[0];    // paper
+        } else if (idx === 1) {
+            color = palette[1];    // ink
+        } else if (idx === 2) {
+            color = palette[8];    // accent (index 8 in 16-color palette)
+        } else if (idx === 15) {
+            color = palette[15];   // highlight
+        } else {
+            // For other indices, fall back to their direct palette entry
+            color = palette[idx] || palette[0];
+        }
+        const [r, g, b] = color;
         imgData.data[i * 4]     = r;
         imgData.data[i * 4 + 1] = g;
         imgData.data[i * 4 + 2] = b;
@@ -682,39 +698,54 @@ function _blitText(text) {
 // ── Save / Load ─────────────────────────────────────────────────────────────
 
 // Grayscale palette for encoding (theme-independent storage)
-// Matches Rust PALETTE_SIZE = 16, index 0 = paper (white/transparent)
+// v0.4+ format: explicit mapping for debug/export
+// 0 → paper (white), 1 → ink (black), 2 → accent (mid-gray), 15 → highlight (light-gray)
 const PALETTE_SIZE = 16;
 const STORAGE_PALETTE = [
-    [255, 255, 255],   // 0: paper - white (alpha=0 for transparent)
+    [255, 255, 255],   // 0: paper - white
     [0, 0, 0],         // 1: ink - black
-    [17, 17, 17],      // 2: dark gray
-    [34, 34, 34],      // 3
+    [119, 119, 119],   // 2: accent - mid-gray
+    [34, 34, 34],      // 3: dark
     [51, 51, 51],      // 4
     [68, 68, 68],      // 5
     [85, 85, 85],      // 6
     [102, 102, 102],   // 7
-    [119, 119, 119],   // 8
-    [136, 136, 136],   // 9
-    [153, 153, 153],   // 10
-    [170, 170, 170],   // 11
-    [187, 187, 187],   // 12
-    [204, 204, 204],   // 13
-    [221, 221, 221],   // 14
-    [238, 238, 238],   // 15: lightest non-paper
+    [136, 136, 136],   // 8
+    [153, 153, 153],   // 9
+    [170, 170, 170],   // 10
+    [187, 187, 187],   // 11
+    [204, 204, 204],   // 12
+    [221, 221, 221],   // 13
+    [238, 238, 238],   // 14
+    [238, 238, 238],   // 15: highlight - light gray
 ];
 
 /// Convert indices to grayscale RGBA for encoding (theme-independent)
-/// Uses v0.4+ format: index 0 = paper (transparent), indices 1-15 = colors
+/// v0.4+ format: explicit index-to-theme mapping for debug PNG
+/// 0 → paper (white), 1 → ink (black), 2 → accent (mid-gray), 15 → highlight (light-gray)
 function indicesToGrayscaleRgba(src = indices) {
     const rgba = new Uint8Array(W * H * 4);
     for (let i = 0; i < W * H; i++) {
         const idx = src[i];
-        const [r, g, b] = STORAGE_PALETTE[idx];
+        let r, g, b;
+        // Explicit mapping: 0=paper, 1=ink, 2=accent, 15=highlight
+        if (idx === 0) {
+            [r, g, b] = [255, 255, 255];      // paper - white
+        } else if (idx === 1) {
+            [r, g, b] = [0, 0, 0];            // ink - black
+        } else if (idx === 2) {
+            [r, g, b] = [119, 119, 119];      // accent - mid-gray
+        } else if (idx === 15) {
+            [r, g, b] = [238, 238, 238];      // highlight - light gray
+        } else {
+            // Other indices: map to grayscale based on storage palette
+            [r, g, b] = STORAGE_PALETTE[idx];
+        }
         rgba[i * 4] = r;
         rgba[i * 4 + 1] = g;
         rgba[i * 4 + 2] = b;
-        // Paper (index 0) is transparent, others are opaque
-        rgba[i * 4 + 3] = idx === 0 ? 0 : 255;
+        // Paper (index 0) is white in debug PNG (not transparent)
+        rgba[i * 4 + 3] = 255;  // fully opaque
     }
     return rgba;
 }
