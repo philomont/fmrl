@@ -6,7 +6,7 @@ use flate2::read::ZlibDecoder;
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
-    IhdrChunk, MAGIC, Palette, TILE_SIZE, parse_chunk, unpack_nibbles,
+    ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, parse_chunk, unpack_nibbles,
 };
 
 #[derive(Debug)]
@@ -21,12 +21,39 @@ pub struct DecodedFmrl {
     pub age_chunk_range: Range<usize>,
 }
 
+/// Tile data - stores either palette indices (indexed mode) or RGBA pixels (RGBA mode)
 #[derive(Debug, Clone)]
 pub struct TileData {
     pub tx: u16,
     pub ty: u16,
     pub flags: u8,
-    pub indices: Vec<u8>,
+    /// For indexed mode: palette indices (0-3), length = TILE_SIZE * TILE_SIZE
+    /// For RGBA mode: raw RGBA pixels, length = TILE_SIZE * TILE_SIZE * 4
+    pub data: Vec<u8>,
+}
+
+impl TileData {
+    /// Check if this tile is in indexed mode
+    pub fn is_indexed(&self) -> bool {
+        self.data.len() == TILE_SIZE * TILE_SIZE
+    }
+
+    /// Check if this tile is in RGBA mode
+    pub fn is_rgba(&self) -> bool {
+        self.data.len() == TILE_SIZE * TILE_SIZE * 4
+    }
+
+    /// Get data as palette indices (panics if not indexed)
+    pub fn indices(&self) -> &[u8] {
+        assert_eq!(self.data.len(), TILE_SIZE * TILE_SIZE, "not indexed mode");
+        &self.data
+    }
+
+    /// Get data as RGBA pixels (panics if not RGBA)
+    pub fn rgba(&self) -> &[u8] {
+        assert_eq!(self.data.len(), TILE_SIZE * TILE_SIZE * 4, "not RGBA mode");
+        &self.data
+    }
 }
 
 fn zlib_decompress(data: &[u8]) -> Result<Vec<u8>, FmrlError> {
@@ -159,6 +186,13 @@ pub fn decode(data: &[u8]) -> Result<DecodedFmrl, FmrlError> {
 }
 
 fn parse_data_chunk(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<TileData>), FmrlError> {
+    match ihdr.color_mode {
+        ColorMode::Indexed => parse_data_chunk_indexed(data, ihdr),
+        ColorMode::Rgba => parse_data_chunk_rgba(data, ihdr),
+    }
+}
+
+fn parse_data_chunk_indexed(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<TileData>), FmrlError> {
     if data.len() < 12 {
         return Err(FmrlError::MalformedChunk("DATA chunk too short for palette"));
     }
@@ -200,7 +234,58 @@ fn parse_data_chunk(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<TileD
                 tx: tx as u16,
                 ty: ty as u16,
                 flags,
-                indices,
+                data: indices,
+            });
+        }
+    }
+
+    Ok((palette, tiles))
+}
+
+fn parse_data_chunk_rgba(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<TileData>), FmrlError> {
+    if data.len() < 3 {
+        return Err(FmrlError::MalformedChunk("DATA chunk too short for paper color"));
+    }
+    // Paper color: 3 bytes RGB (used as fade target)
+    let paper_color = [data[0], data[1], data[2]];
+    // Create a palette with paper as index 1, others default
+    let mut palette = Palette::default();
+    palette.0[1] = paper_color;
+
+    let w = ihdr.width as usize;
+    let h = ihdr.height as usize;
+    let tiles_x = w / TILE_SIZE;
+    let tiles_y = h / TILE_SIZE;
+    let rgba_count = TILE_SIZE * TILE_SIZE * 4;
+
+    let mut tiles = Vec::with_capacity(tiles_x * tiles_y);
+    let mut pos = 3usize;
+
+    for ty in 0..tiles_y {
+        for tx in 0..tiles_x {
+            if pos + 3 > data.len() {
+                return Err(FmrlError::UnexpectedEof);
+            }
+            let comp_len = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
+            let flags = data[pos + 2];
+            pos += 3;
+
+            if pos + comp_len > data.len() {
+                return Err(FmrlError::UnexpectedEof);
+            }
+            let compressed = &data[pos..pos + comp_len];
+            pos += comp_len;
+
+            let rgba = zlib_decompress(compressed)?;
+            if rgba.len() != rgba_count {
+                return Err(FmrlError::MalformedChunk("RGBA tile size mismatch"));
+            }
+
+            tiles.push(TileData {
+                tx: tx as u16,
+                ty: ty as u16,
+                flags,
+                data: rgba,
             });
         }
     }

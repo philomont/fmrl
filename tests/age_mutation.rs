@@ -7,7 +7,9 @@ const VIEW_MS: u64 = NOW_MS + 5 * 24 * 3600 * 1000; // 5 days later
 fn simple_image() -> FmrlImage {
     let palette = Palette::default();
     let pixels = vec![0u8, 0, 0, 255].repeat(64 * 64);
-    FmrlImage { width: 64, height: 64, palette, pixels, decay_policy: 0, meta: None }
+    let mut image = FmrlImage::new(64, 64, pixels);
+    image.palette = palette;
+    image
 }
 
 #[test]
