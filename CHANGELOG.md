@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-10
+
+### Added
+
+- Theme-independent storage format using grayscale palette — files now store theme-agnostic palette indices (ink=black, paper=transparent, accent=white, highlight=gray) rather than theme colors, eliminating save/load color corruption when switching themes
+- Alpha-aware quantization: transparent pixels (alpha < 128) map to paper (index 1); opaque pixels use brightness thresholds (ink < 64, accent > 191, highlight 64-191)
+- Debug mode checkbox in About tray: when enabled, Save downloads both `.fmrl` and `.png` for inspection
+- `indicesToGrayscaleRgba()` in JS — converts palette indices to grayscale RGBA using the storage palette for debug PNG generation
+
+### Changed
+
+- Re-enabled aging on save: one `age_step` applied during encode pipeline (was temporarily disabled); Save now ages the image visibly
+- Storage palette defined in both Rust (`format.rs`) and JS — single source of truth for theme-independent encoding
+
+### Fixed
+
+- Theme-dependent color mapping causing incorrect colors after save/load cycle — grayscale storage ensures deterministic roundtrip regardless of active theme
+- Palette index 1 (paper) now correctly stored as transparent; index 2 (accent) and index 3 (highlight) distinguished by brightness rather than theme color values
+
 ## [0.2.0] - 2026-03-09
 
 ### Added
