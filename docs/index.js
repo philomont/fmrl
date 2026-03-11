@@ -1,4 +1,7 @@
-import init, { FmrlView, encode_rgba, decode_to_indices } from './pkg/fmrl.js';
+import init, { FmrlView, encode_rgba, encode_rgba_with_age, decode_to_indices } from './pkg/fmrl.js';
+
+// Age type: 0 = erosion (default), 1 = fade, 2 = noise
+let currentAgeType = 0;
 
 // ── Canvas dimensions ───────────────────────────────────────────────────────
 
@@ -774,7 +777,8 @@ function indicesToGrayscaleRgba(src = indices) {
 function saveFmrl() {
     try {
         // Encode current canvas state using grayscale (theme-independent storage)
-        const bytes = encode_rgba(indicesToGrayscaleRgba(indices), W, H);
+        // Use current age type (0=erosion, 1=fade, 2=noise)
+        const bytes = encode_rgba_with_age(indicesToGrayscaleRgba(indices), W, H, currentAgeType);
 
         // Save FMRL file
         const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));

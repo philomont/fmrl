@@ -7,7 +7,7 @@ use crate::age::age_step;
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
-    ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, write_chunk,
+    AgeType, ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, write_chunk,
 };
 
 /// Input image to encode
@@ -19,6 +19,7 @@ pub struct FmrlImage {
     /// RGBA row-major pixels, width*height*4 bytes
     pub pixels: Vec<u8>,
     pub decay_policy: u8,
+    pub age_type: AgeType,
     pub meta: Option<serde_json::Value>,
 }
 
@@ -32,6 +33,7 @@ impl FmrlImage {
             palette: Palette::default(),
             pixels,
             decay_policy: 0,
+            age_type: AgeType::Erosion,
             meta: None,
         }
     }
@@ -45,6 +47,7 @@ impl FmrlImage {
             palette: Palette::default(), // Still used for paper color reference
             pixels,
             decay_policy: 0,
+            age_type: AgeType::Erosion,
             meta: None,
         }
     }
@@ -112,7 +115,7 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     out.extend_from_slice(&MAGIC);
 
     // IHDR chunk
-    let ihdr = IhdrChunk::new(image.width, image.height, image.color_mode, image.decay_policy);
+    let ihdr = IhdrChunk::new(image.width, image.height, image.color_mode, image.decay_policy, image.age_type);
     write_chunk(&mut out, CHUNK_IHDR, &ihdr.to_bytes());
 
     // DATA chunk: mode-dependent

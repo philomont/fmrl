@@ -16,9 +16,14 @@ pub const CHUNK_IEND: &[u8; 4] = b"IEND";
 pub const COLOR_TYPE_INDEXED: u8 = 3; // Palette-based, 4-color
 pub const COLOR_TYPE_RGBA: u8 = 6;    // Full RGBA (8-bit per channel)
 
+// Age types for different aging algorithms
+pub const AGE_TYPE_EROSION: u8 = 0;   // Morphological erosion (default)
+pub const AGE_TYPE_FADE: u8 = 1;      // Simple fade-to-paper
+pub const AGE_TYPE_NOISE: u8 = 2;     // Perlin noise degradation
+
 /// IHDR payload length: width(2) + height(2) + bit_depth(1) + color_type(1) +
-/// compression(1) + filter(1) + interlace(1) + decay_policy(1) = 10 bytes
-pub const IHDR_LEN: usize = 10;
+/// compression(1) + filter(1) + interlace(1) + decay_policy(1) + age_type(1) = 11 bytes
+pub const IHDR_LEN: usize = 11;
 
 /// AGE entry: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) +
 /// edge_damage(1) + reserved(2) + _pad(2) = 22 bytes
@@ -52,6 +57,38 @@ impl ColorMode {
     }
 }
 
+/// Age type for different aging algorithms
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AgeType {
+    /// Morphological erosion - erodes edges of strokes
+    Erosion,
+    /// Simple fade to paper color
+    Fade,
+    /// Perlin noise-based degradation
+    Noise,
+}
+
+impl AgeType {
+    /// Convert to u8 for storage
+    pub fn as_u8(self) -> u8 {
+        match self {
+            AgeType::Erosion => AGE_TYPE_EROSION,
+            AgeType::Fade => AGE_TYPE_FADE,
+            AgeType::Noise => AGE_TYPE_NOISE,
+        }
+    }
+
+    /// Parse from u8
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            AGE_TYPE_EROSION => Some(AgeType::Erosion),
+            AGE_TYPE_FADE => Some(AgeType::Fade),
+            AGE_TYPE_NOISE => Some(AgeType::Noise),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IhdrChunk {
     pub width: u16,
@@ -62,10 +99,11 @@ pub struct IhdrChunk {
     pub filter: u8,
     pub interlace: u8,
     pub decay_policy: u8,
+    pub age_type: AgeType,
 }
 
 impl IhdrChunk {
-    pub fn new(width: u16, height: u16, color_mode: ColorMode, decay_policy: u8) -> Self {
+    pub fn new(width: u16, height: u16, color_mode: ColorMode, decay_policy: u8, age_type: AgeType) -> Self {
         IhdrChunk {
             width,
             height,
@@ -75,12 +113,13 @@ impl IhdrChunk {
             filter: 0,
             interlace: 0,
             decay_policy,
+            age_type,
         }
     }
 
     /// Create with default indexed color mode (backward compatible)
     pub fn new_indexed(width: u16, height: u16, decay_policy: u8) -> Self {
-        Self::new(width, height, ColorMode::Indexed, decay_policy)
+        Self::new(width, height, ColorMode::Indexed, decay_policy, AgeType::Erosion)
     }
 
     pub fn to_bytes(&self) -> [u8; IHDR_LEN] {
@@ -93,6 +132,7 @@ impl IhdrChunk {
         buf[7] = self.filter;
         buf[8] = self.interlace;
         buf[9] = self.decay_policy;
+        buf[10] = self.age_type.as_u8();
         buf
     }
 
@@ -102,6 +142,8 @@ impl IhdrChunk {
         }
         let color_mode = ColorMode::from_u8(b[5])
             .ok_or(FmrlError::MalformedChunk("unsupported color type"))?;
+        let age_type = AgeType::from_u8(b[10])
+            .ok_or(FmrlError::MalformedChunk("unsupported age type"))?;
         Ok(IhdrChunk {
             width: u16::from_be_bytes([b[0], b[1]]),
             height: u16::from_be_bytes([b[2], b[3]]),
@@ -111,6 +153,7 @@ impl IhdrChunk {
             filter: b[7],
             interlace: b[8],
             decay_policy: b[9],
+            age_type,
         })
     }
 }

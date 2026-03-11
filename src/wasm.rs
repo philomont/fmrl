@@ -5,7 +5,7 @@ use wasm_bindgen::prelude::*;
 use crate::age::age_step;
 use crate::decode::{DecodedFmrl, decode};
 use crate::encode::{FmrlImage, encode};
-use crate::format::{ColorMode, Palette, TILE_SIZE};
+use crate::format::{AgeType, ColorMode, Palette, TILE_SIZE};
 use crate::render;
 
 #[wasm_bindgen]
@@ -72,23 +72,46 @@ impl FmrlView {
     pub fn is_rgba(&self) -> bool {
         self.decoded.ihdr.color_mode == ColorMode::Rgba
     }
+
+    /// Returns the age type: 0 = erosion, 1 = fade, 2 = noise
+    pub fn age_type(&self) -> u8 {
+        self.decoded.ihdr.age_type.as_u8()
+    }
 }
 
 /// Encode raw RGBA pixels into a new .fmrl file using indexed mode (palette quantization).
 /// `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+/// Uses default age_type (erosion).
 #[wasm_bindgen]
 pub fn encode_rgba(rgba: &[u8], width: u16, height: u16) -> Result<Vec<u8>, JsValue> {
+    encode_rgba_with_age(rgba, width, height, 0)
+}
+
+/// Encode raw RGBA pixels with specified age type.
+/// `age_type`: 0 = erosion, 1 = fade, 2 = noise
+#[wasm_bindgen]
+pub fn encode_rgba_with_age(rgba: &[u8], width: u16, height: u16, age_type: u8) -> Result<Vec<u8>, JsValue> {
     let now = js_sys::Date::now() as u64;
-    let image = FmrlImage::new(width, height, rgba.to_vec());
+    let mut image = FmrlImage::new(width, height, rgba.to_vec());
+    image.age_type = AgeType::from_u8(age_type).unwrap_or(AgeType::Erosion);
     encode(&image, now).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 /// Encode raw RGBA pixels into a new .fmrl file using full RGBA mode (no palette quantization).
 /// `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+/// Uses default age_type (erosion).
 #[wasm_bindgen]
 pub fn encode_rgba_full(rgba: &[u8], width: u16, height: u16) -> Result<Vec<u8>, JsValue> {
+    encode_rgba_full_with_age(rgba, width, height, 0)
+}
+
+/// Encode raw RGBA pixels in full RGBA mode with specified age type.
+/// `age_type`: 0 = erosion, 1 = fade, 2 = noise
+#[wasm_bindgen]
+pub fn encode_rgba_full_with_age(rgba: &[u8], width: u16, height: u16, age_type: u8) -> Result<Vec<u8>, JsValue> {
     let now = js_sys::Date::now() as u64;
-    let image = FmrlImage::new_rgba(width, height, rgba.to_vec());
+    let mut image = FmrlImage::new_rgba(width, height, rgba.to_vec());
+    image.age_type = AgeType::from_u8(age_type).unwrap_or(AgeType::Erosion);
     encode(&image, now).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
