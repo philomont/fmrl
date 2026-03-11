@@ -105,3 +105,80 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
 
     next
 }
+
+/// Apply one consolidation step: reduce effective resolution by 2×.
+///
+/// Divides the image into 2×2 blocks. Each block becomes a single pixel
+/// with the most common index from the 4 pixels. On ties, the lowest
+/// index wins. The result is then upscaled back to original size by
+/// duplicating each consolidated pixel 2×2.
+///
+/// This creates large uniform areas that zlib compresses efficiently,
+/// genuinely reducing information content (file size decreases).
+///
+/// Returns a new Vec with the consolidated indices at original dimensions.
+pub fn consolidation_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
+    assert!(width % 2 == 0 && height % 2 == 0, "dimensions must be even for consolidation");
+
+    let half_w = width / 2;
+    let half_h = height / 2;
+
+    // Step 1: consolidate 2×2 blocks into 1 pixel each
+    let mut consolidated = vec![0u8; half_w * half_h];
+
+    for by in 0..half_h {
+        for bx in 0..half_w {
+            // Collect the 4 pixels in this 2×2 block
+            let x0 = bx * 2;
+            let y0 = by * 2;
+
+            let p0 = indices[y0 * width + x0];
+            let p1 = indices[y0 * width + (x0 + 1)];
+            let p2 = indices[(y0 + 1) * width + x0];
+            let p3 = indices[(y0 + 1) * width + (x0 + 1)];
+
+            // Find most common index, with lowest index winning ties
+            consolidated[by * half_w + bx] = most_common_index([p0, p1, p2, p3]);
+        }
+    }
+
+    // Step 2: upscale back to original dimensions by 2× duplication
+    let mut result = vec![0u8; width * height];
+    for by in 0..half_h {
+        for bx in 0..half_w {
+            let c = consolidated[by * half_w + bx];
+            let x0 = bx * 2;
+            let y0 = by * 2;
+
+            // Write 2×2 block
+            result[y0 * width + x0] = c;
+            result[y0 * width + (x0 + 1)] = c;
+            result[(y0 + 1) * width + x0] = c;
+            result[(y0 + 1) * width + (x0 + 1)] = c;
+        }
+    }
+
+    result
+}
+
+/// Find the most common index in 4 values.
+/// Returns the lowest index on ties.
+fn most_common_index([a, b, c, d]: [u8; 4]) -> u8 {
+    // Count occurrences (max index is 15 for 16-color palette)
+    let mut counts = [0u8; 16];
+    counts[a as usize] += 1;
+    counts[b as usize] += 1;
+    counts[c as usize] += 1;
+    counts[d as usize] += 1;
+
+    // Find index with highest count, lowest index on ties
+    let mut best_idx = 0u8;
+    let mut best_count = counts[0];
+    for i in 1..16 {
+        if counts[i] > best_count {
+            best_count = counts[i];
+            best_idx = i as u8;
+        }
+    }
+    best_idx
+}
