@@ -133,8 +133,10 @@ Raw RGBA pixels
          │
          ▼
 ┌─────────────────┐
-│ Apply age_step  │  ← morphological erosion
-│ (optional)      │
+│ Apply aging     │  ← based on age_type:
+│ (if configured) │    • Erosion: morphological + short-run
+│                 │    • Consolidation: block merging
+│                 │    • Bleach: convolutional cleaning
 └────────┬────────┘
          │
          ▼
@@ -145,7 +147,7 @@ Raw RGBA pixels
          │
          ▼
 ┌─────────────────┐
-│ zlib compress   │  ← per tile
+│ zlib compress   │  ← best compression (level 9)
 │ each tile       │
 └────────┬────────┘
          │
@@ -161,7 +163,153 @@ Raw RGBA pixels
 
 ---
 
-## Aging Algorithm
+## Aging Algorithms
+
+Three distinct aging mechanisms are available via the `age_type` field in IHDR (byte 10):
+
+| Type | Value | Name | Description |
+|------|-------|------|-------------|
+| 0 | 0x00 | Erosion | Morphological erosion + short-run elimination |
+| 1 | 0x01 | Consolidation | Progressive block merging (2×2 → 4×4 → 8×8 → 16×16) |
+| 2 | 0x02 | Bleach | Convolutional pattern cleaning (sliding 2×2 windows) |
+
+---
+
+## Algorithm 1: Erosion
+
+Two-pass information-reducing filter.
+
+### Phase 1: Morphological Erosion
+
+A non-paper pixel (index > 0) becomes paper if it has **≥ 4 paper 8-neighbors** (out-of-bounds treated as paper):
+
+```
+for each pixel (x,y):
+    if index[y][x] > 0:
+        paper_neighbors = count_8_neighbors_where(index == 0)
+        if paper_neighbors >= 4:
+            index[y][x] = 0  // erode to paper
+```
+
+### Phase 2: Short-Run Elimination
+
+Scan rows then columns. Any non-paper run of length ≤ `RUN_THRESHOLD` (2) becomes paper:
+
+```
+// Horizontal pass (rows)
+for each row y:
+    find runs of index > 0
+    if run_length <= 2:
+        set run to paper
+
+// Vertical pass (columns)
+for each column x:
+    find runs of index > 0
+    if run_length <= 2:
+        set run to paper
+```
+
+### Convergence
+
+Guaranteed to reach all-paper because:
+- Paper (index 0) is the only fixed point
+- All operations only convert non-paper → paper
+- No operation creates non-paper pixels
+
+---
+
+## Algorithm 2: Consolidation
+
+Hierarchical block merging with per-pixel age tracking.
+
+### Per-Pixel Ages
+
+Each pixel has an independent age (0-4):
+- Age 0: Just drawn, participates in 2×2 consolidation
+- Age 1: Participates in 4×4 consolidation
+- Age 2: Participates in 8×8 consolidation
+- Age 3: Participates in 16×16 consolidation
+- Age 4+: Becomes paper
+
+### Consolidation Rules
+
+A block consolidates when **ALL pixels have age ≤ threshold AND at least one pixel has age == threshold**:
+
+```
+2×2 blocks:  min_age == 0  → set all to age 1
+4×4 blocks:  min_age == 1  → set all to age 2
+8×8 blocks:  min_age == 2  → set all to age 3
+16×16 blocks: min_age == 3 → set all to age 4 (paper)
+```
+
+### Block Value Assignment
+
+Consolidated blocks take the **minimum non-zero index** of their constituent pixels (0 if all paper):
+
+```
+new_index = min(filter(index > 0)) or 0
+```
+
+### Key Property
+
+Mixed-age blocks consolidate at the level of the **youngest** pixels, allowing new drawings to age alongside existing content.
+
+---
+
+## Algorithm 3: Bleach
+
+Convolutional pattern cleaning using sliding 2×2 windows.
+
+### Sliding Window
+
+Unlike fixed tiles, bleach uses overlapping windows covering every pixel position:
+
+```
+for y in 0..height-1:
+    for x in 0..width-1:
+        block = [index[y][x],     index[y][x+1],
+                 index[y+1][x],   index[y+1][x+1]]
+        if is_bleachable(block):
+            mark all 4 pixels for bleaching
+
+// Apply bleaching (all marked pixels → paper)
+```
+
+### Bleachable Patterns
+
+A 2×2 block becomes paper if:
+
+| Condition | Example | Reason |
+|-----------|---------|--------|
+| 3+ unique indices | `[[0,1],[2,0]]` | Information-rich/noisy |
+| Imbalanced 3:1 | `[[1,1],[1,2]]` | Uneven distribution |
+| Anti-diagonal | `[[1,2],[2,1]]` | `a,b` / `b,a` pattern |
+
+```
+fn is_bleachable(block[4]) -> bool:
+    counts = histogram(block)  // count of each index 0-15
+    unique = count_nonzero(counts)
+
+    if unique >= 3:
+        return true  // too noisy
+
+    if unique == 2:
+        c1, c2 = the two counts
+        if c1 == 3 or c2 == 3:
+            return true  // 3:1 imbalanced
+        if c1 == 2 and c2 == 2:
+            // Check anti-diagonal: [[a,b],[b,a]]
+            if block[0] == block[3] and block[1] == block[2]:
+                return true
+
+    return false  // uniform or acceptable
+```
+
+### Convergence
+
+Like erosion, bleach only converts to paper, guaranteeing convergence to all-paper.
+
+---
 
 FMRL aging uses morphological erosion to gradually reduce non-paper pixels.
 
@@ -275,7 +423,9 @@ Offset  Size    Field
 | Function | File | Purpose |
 |----------|------|---------|
 | `quantize_pixel()` | `src/encode.rs` | RGBA → 16 palette indices |
-| `age_step()` | `src/age.rs` | Morphological erosion |
+| `age_step()` | `src/age.rs` | Erosion aging |
+| `consolidation_step_with_pixel_ages()` | `src/age.rs` | Consolidation aging |
+| `bleach_step()` | `src/age.rs` | Bleach aging |
 | `Palette::default()` | `src/format.rs` | 16-entry grayscale palette |
 | `PALETTE_SIZE` | `src/format.rs` | Constant = 16 |
 
@@ -283,9 +433,11 @@ Offset  Size    Field
 
 - `encode_rgba()` — encode with indexed mode
 - `encode_rgba_full()` — encode with RGBA mode
+- `encode_rgba_with_age()` — encode with specified age type
 - `decode_to_indices()` — decode to palette indices
 - `decode_to_rgba()` — decode to RGBA pixels
-- `age_step_indices()` — apply one aging step
+- `consolidation_step_indices()` — apply consolidation step
+- `bleach_step_indices()` — apply bleach step
 
 ---
 

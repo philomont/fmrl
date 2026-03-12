@@ -141,14 +141,21 @@ Three fixed brush sizes:
 ## Aging UI
 
 ### Controls
-- **Age**: Apply one full aging step (erosion + short-run elimination)
+- **Age**: Apply one full aging step
 - **Age ×10**: Apply 10 steps at once
 - **Auto**: Toggle passive aging with adjustable rate
 - **Rate**: Six intervals (50ms, 100ms, 200ms, 500ms, 1s, 2s)
+- **Aging Technique**: Choose between Erosion, Consolidation, or Bleach
 
-### Two-Tier Aging
-- **Full** (`full=true`): Erosion + short-run elimination — used for Age buttons and save
-- **Light** (`full=false`): Erosion only — used for auto-aging for fluid animation
+### Aging Techniques
+
+| Technique | Description | Best For |
+|-----------|-------------|----------|
+| **Erosion** | Morphological erosion + short-run elimination | Gradual edge degradation |
+| **Consolidation** | Progressive block merging (2×2 → 4×4 → 8×8 → 16×16) | Blocky/retro aesthetic |
+| **Bleach** | Convolutional cleaning of noisy 2×2 patterns | Speckle removal, smoothing |
+
+All techniques converge to all-paper and reduce file size.
 
 ---
 

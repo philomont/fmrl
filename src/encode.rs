@@ -91,8 +91,9 @@ fn quantize_pixel(r: u8, g: u8, b: u8, a: u8) -> u8 {
 }
 
 /// Compress bytes with zlib (not raw DEFLATE).
+/// Uses best compression for smallest file size.
 fn zlib_compress(data: &[u8]) -> Result<Vec<u8>, FmrlError> {
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
     encoder.write_all(data).map_err(|e| FmrlError::CompressionError(e.to_string()))?;
     encoder.finish().map_err(|e| FmrlError::CompressionError(e.to_string()))
 }
