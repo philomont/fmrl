@@ -30,7 +30,7 @@ export class FmrlView {
         return v1;
     }
     /**
-     * Returns the age type: 0 = erosion, 1 = fade, 2 = noise
+     * Returns the age type: 0 = erosion, 1 = consolidation, 2 = bleach
      * @returns {number}
      */
     age_type() {
@@ -129,6 +129,28 @@ export class FmrlView {
     }
 }
 if (Symbol.dispose) FmrlView.prototype[Symbol.dispose] = FmrlView.prototype.free;
+
+/**
+ * Apply one convolutional bleach step.
+ *
+ * Uses 2×2 convolution to detect and bleach "noisy" blocks:
+ * - If 3+ different indices in 2×2 block → becomes paper
+ * - If 2 indices with unequal counts → becomes paper
+ * - If 2 indices with equal counts (2 each) AND diagonal pattern → becomes paper
+ * See `age::bleach_step` for the full algorithm description.
+ * @param {Uint8Array} data
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8Array}
+ */
+export function bleach_step_indices(data, width, height) {
+    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.bleach_step_indices(ptr0, len0, width, height);
+    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v2;
+}
 
 /**
  * Apply one consolidation step: reduce resolution by 2× then upscale back.

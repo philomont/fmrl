@@ -3,7 +3,7 @@ use std::io::Write;
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 
-use crate::age::{age_step, consolidation_step_with_age, consolidation_step_with_pixel_ages};
+use crate::age::{age_step, bleach_step, consolidation_step_with_age, consolidation_step_with_pixel_ages};
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
@@ -235,9 +235,9 @@ fn encode_indexed(
                 consolidation_step_with_age(&indices, w, h, &mut age_levels)
             }
         }
-        AgeType::Noise => {
-            // TODO: implement noise-based aging
-            age_step(&indices, w, h)
+        AgeType::Bleach => {
+            // Convolutional bleach: 2x2 blocks with mixed/diagonal patterns become paper
+            bleach_step(&indices, w, h)
         }
     };
 

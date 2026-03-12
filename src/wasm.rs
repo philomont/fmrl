@@ -2,7 +2,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::age::{age_step, consolidation_step, consolidation_step_with_pixel_ages};
+use crate::age::{age_step, bleach_step, consolidation_step, consolidation_step_with_pixel_ages};
 use crate::decode::{DecodedFmrl, decode};
 use crate::encode::{FmrlImage, encode};
 use crate::format::{AgeType, ColorMode, Palette, TILE_SIZE};
@@ -73,7 +73,7 @@ impl FmrlView {
         self.decoded.ihdr.color_mode == ColorMode::Rgba
     }
 
-    /// Returns the age type: 0 = erosion, 1 = fade, 2 = noise
+    /// Returns the age type: 0 = erosion, 1 = consolidation, 2 = bleach
     pub fn age_type(&self) -> u8 {
         self.decoded.ihdr.age_type.as_u8()
     }
@@ -322,6 +322,18 @@ pub fn consolidation_step_with_ages(
 #[wasm_bindgen]
 pub fn consolidation_step_indices(data: &[u8], width: u16, height: u16) -> Vec<u8> {
     consolidation_step(data, width as usize, height as usize)
+}
+
+/// Apply one convolutional bleach step.
+///
+/// Uses 2×2 convolution to detect and bleach "noisy" blocks:
+/// - If 3+ different indices in 2×2 block → becomes paper
+/// - If 2 indices with unequal counts → becomes paper
+/// - If 2 indices with equal counts (2 each) AND diagonal pattern → becomes paper
+/// See `age::bleach_step` for the full algorithm description.
+#[wasm_bindgen]
+pub fn bleach_step_indices(data: &[u8], width: u16, height: u16) -> Vec<u8> {
+    bleach_step(data, width as usize, height as usize)
 }
 
 /// Create a fresh demo .fmrl file with a manuscript-like pattern.

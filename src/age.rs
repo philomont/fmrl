@@ -468,3 +468,115 @@ pub fn consolidation_step(indices: &[u8], width: usize, height: usize) -> Vec<u8
     let mut dummy_age = vec![0u8; (width / 32) * (height / 32)];
     consolidation_step_with_age(indices, width, height, &mut dummy_age)
 }
+
+/// Apply one convolutional bleach step.
+///
+/// Uses 2×2 convolution to detect and bleach "noisy" blocks:
+/// - If 3 or 4 different indices in 2×2 block → becomes paper
+/// - If 2 indices with unequal counts → becomes paper
+/// - If 2 indices with equal counts (2 each) AND diagonal pattern → becomes paper
+/// - All other arrangements remain unchanged
+///
+/// Examples that become paper:
+/// - [[1,2],[3,4]] (4 different indices)
+/// - [[1,2],[3,1]] (3 different indices)
+/// - [[1,1],[2,2]] (2 indices, equal, not diagonal)
+/// - [[1,2],[2,1]] (2 indices, equal, diagonal)
+///
+/// Examples that remain unchanged:
+/// - [[1,1],[1,1]] (all same)
+/// - [[1,1],[1,2]] (3 same, 1 different - not paper)
+pub fn bleach_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
+    let mut result = indices.to_vec();
+
+    // Process 2×2 blocks
+    for y in (0..height).step_by(2) {
+        for x in (0..width).step_by(2) {
+            // Collect the 4 pixels in this block
+            let mut block = [0u8; 4];
+            let mut i = 0;
+
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let py = (y + dy).min(height - 1);
+                    let px = (x + dx).min(width - 1);
+                    block[i] = indices[py * width + px];
+                    i += 1;
+                }
+            }
+
+            // Count unique indices (excluding paper which is already 0)
+            let mut unique = [0u8; 4];
+            let mut unique_count = 0;
+            for &idx in &block {
+                if idx != PAPER_INDEX {
+                    let mut found = false;
+                    for j in 0..unique_count {
+                        if unique[j] == idx {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if !found && unique_count < 4 {
+                        unique[unique_count] = idx;
+                        unique_count += 1;
+                    }
+                }
+            }
+
+            // Count non-paper pixels
+            let non_paper_count = block.iter().filter(|&&x| x != PAPER_INDEX).count();
+
+            // Case 1: 3 or 4 different non-paper indices → paper
+            if unique_count >= 3 {
+                for dy in 0..2 {
+                    for dx in 0..2 {
+                        let py = (y + dy).min(height - 1);
+                        let px = (x + dx).min(width - 1);
+                        result[py * width + px] = PAPER_INDEX;
+                    }
+                }
+                continue;
+            }
+
+            // Case 2: Exactly 2 different indices
+            if unique_count == 2 {
+                // Count occurrences of each
+                let idx1 = unique[0];
+                let idx2 = unique[1];
+                let count1 = block.iter().filter(|&&x| x == idx1).count();
+                let count2 = block.iter().filter(|&&x| x == idx2).count();
+
+                // If unequal counts → paper
+                if count1 != count2 {
+                    for dy in 0..2 {
+                        for dx in 0..2 {
+                            let py = (y + dy).min(height - 1);
+                            let px = (x + dx).min(width - 1);
+                            result[py * width + px] = PAPER_INDEX;
+                        }
+                    }
+                    continue;
+                }
+
+                // Equal counts (2 each) - check if diagonal
+                // Diagonal patterns: [[a,b],[b,a]]
+                let is_diagonal =
+                    block[0] == block[3] && block[1] == block[2] && block[0] != block[1];
+
+                if is_diagonal {
+                    for dy in 0..2 {
+                        for dx in 0..2 {
+                            let py = (y + dy).min(height - 1);
+                            let px = (x + dx).min(width - 1);
+                            result[py * width + px] = PAPER_INDEX;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    result
+}
+

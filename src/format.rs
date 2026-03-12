@@ -20,7 +20,7 @@ pub const COLOR_TYPE_RGBA: u8 = 6;    // Full RGBA (8-bit per channel)
 // All types must reduce information (file size decreases with each application)
 pub const AGE_TYPE_EROSION: u8 = 0;        // Morphological erosion (default)
 pub const AGE_TYPE_CONSOLIDATION: u8 = 1; // Neighbor consolidation: 32x32 → 16x16
-pub const AGE_TYPE_NOISE: u8 = 2;        // Perlin noise degradation (TODO)
+pub const AGE_TYPE_BLEACH: u8 = 2;       // Convolutional bleach: mixed/diagonal 2x2 → paper
 
 /// IHDR payload length: width(2) + height(2) + bit_depth(1) + color_type(1) +
 /// compression(1) + filter(1) + interlace(1) + decay_policy(1) + age_type(1) = 11 bytes
@@ -67,8 +67,8 @@ pub enum AgeType {
     /// Neighbor consolidation: 2x2 blocks merge to 1 pixel,
     /// tile resolution reduces 32x32 → 16x16
     Consolidation,
-    /// Perlin noise-based degradation (TODO)
-    Noise,
+    /// Convolutional bleach: 2x2 blocks with mixed/diagonal patterns become paper
+    Bleach,
 }
 
 impl AgeType {
@@ -77,7 +77,7 @@ impl AgeType {
         match self {
             AgeType::Erosion => AGE_TYPE_EROSION,
             AgeType::Consolidation => AGE_TYPE_CONSOLIDATION,
-            AgeType::Noise => AGE_TYPE_NOISE,
+            AgeType::Bleach => AGE_TYPE_BLEACH,
         }
     }
 
@@ -86,7 +86,7 @@ impl AgeType {
         match value {
             AGE_TYPE_EROSION => Some(AgeType::Erosion),
             AGE_TYPE_CONSOLIDATION => Some(AgeType::Consolidation),
-            AGE_TYPE_NOISE => Some(AgeType::Noise),
+            AGE_TYPE_BLEACH => Some(AgeType::Bleach),
             _ => None,
         }
     }

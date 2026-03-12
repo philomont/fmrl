@@ -1,4 +1,4 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, encode_rgba_with_pixel_ages } from './pkg/fmrl.js';
+import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, bleach_step_indices, encode_rgba_with_pixel_ages } from './pkg/fmrl.js';
 
 // Age type: 0 = erosion (default), 1 = consolidation
 let currentAgeType = 0;
@@ -474,7 +474,7 @@ function _doAgeStep(src, full = true) {
 
 function applyAge(n = 1) {
     try {
-        // For consolidation mode, use per-pixel ages directly
+        // For consolidation mode (age type 1), use per-pixel ages directly
         if (currentAgeType === 1) {
             // Initialize pixel ages if needed
             if (!currentPixelAges || currentPixelAges.length !== W * H) {
@@ -500,7 +500,17 @@ function applyAge(n = 1) {
             return;
         }
 
-        // For erosion mode, use the encode/decode cycle
+        // For bleach mode (age type 2), apply 2x2 convolutional bleach
+        if (currentAgeType === 2) {
+            for (let i = 0; i < n; i++) {
+                indices = new Uint8Array(bleach_step_indices(indices, W, H));
+            }
+            render();
+            updateMetric();
+            return;
+        }
+
+        // For erosion mode (age type 0), use the encode/decode cycle
         // Age levels persist through the cycle
         for (let i = 0; i < n; i++) {
             // Convert current indices to RGBA for encoding
@@ -1204,7 +1214,8 @@ async function main() {
     // ── Age Type ────────────────────────────────────────────────────────────
     document.getElementById('age-type-select').addEventListener('change', e => {
         currentAgeType = parseInt(e.target.value, 10);
-        console.log('Age type changed to:', currentAgeType === 0 ? 'Erosion' : 'Consolidation');
+        const ageTypeNames = ['Erosion', 'Consolidation', 'Bleach'];
+        console.log('Age type changed to:', ageTypeNames[currentAgeType] || 'Unknown');
     });
 
     // ── Color Editor Tool ───────────────────────────────────────────────────

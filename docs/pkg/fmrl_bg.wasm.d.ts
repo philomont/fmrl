@@ -2,6 +2,7 @@
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
 export const __wbg_fmrlview_free: (a: number, b: number) => void;
+export const bleach_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
 export const consolidation_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
 export const consolidation_step_with_ages: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
 export const create_demo_fmrl: () => [number, number, number, number];

@@ -11,7 +11,7 @@ export class FmrlView {
      */
     age_levels(): Uint8Array;
     /**
-     * Returns the age type: 0 = erosion, 1 = fade, 2 = noise
+     * Returns the age type: 0 = erosion, 1 = consolidation, 2 = bleach
      */
     age_type(): number;
     /**
@@ -46,6 +46,17 @@ export class FmrlView {
     view_count(): number;
     width(): number;
 }
+
+/**
+ * Apply one convolutional bleach step.
+ *
+ * Uses 2×2 convolution to detect and bleach "noisy" blocks:
+ * - If 3+ different indices in 2×2 block → becomes paper
+ * - If 2 indices with unequal counts → becomes paper
+ * - If 2 indices with equal counts (2 each) AND diagonal pattern → becomes paper
+ * See `age::bleach_step` for the full algorithm description.
+ */
+export function bleach_step_indices(data: Uint8Array, width: number, height: number): Uint8Array;
 
 /**
  * Apply one consolidation step: reduce resolution by 2× then upscale back.
@@ -132,6 +143,7 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_fmrlview_free: (a: number, b: number) => void;
+    readonly bleach_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
     readonly consolidation_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
     readonly consolidation_step_with_ages: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly create_demo_fmrl: () => [number, number, number, number];
