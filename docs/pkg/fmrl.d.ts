@@ -41,6 +41,12 @@ export class FmrlView {
     last_view_ms(): number;
     static new(data: Uint8Array): FmrlView;
     /**
+     * Returns per-pixel ages extracted from packed tile data.
+     * For indexed mode: unpacks low nibble from packed format.
+     * For RGBA mode: returns zeros (no per-pixel ages stored).
+     */
+    pixel_ages(): Uint8Array;
+    /**
      * Number of times this image has been viewed (using fade_level of tile 0 as proxy).
      */
     view_count(): number;
@@ -165,6 +171,7 @@ export interface InitOutput {
     readonly fmrlview_is_rgba: (a: number) => number;
     readonly fmrlview_last_view_ms: (a: number) => number;
     readonly fmrlview_new: (a: number, b: number) => [number, number, number];
+    readonly fmrlview_pixel_ages: (a: number) => [number, number];
     readonly fmrlview_view_count: (a: number) => number;
     readonly fmrlview_width: (a: number) => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;

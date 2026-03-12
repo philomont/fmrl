@@ -83,6 +83,33 @@ impl FmrlView {
     pub fn age_levels(&self) -> Vec<u8> {
         self.decoded.age.iter().map(|a| a.fade_level).collect()
     }
+
+    /// Returns per-pixel ages extracted from packed tile data.
+    /// For indexed mode: unpacks low nibble from packed format.
+    /// For RGBA mode: returns zeros (no per-pixel ages stored).
+    pub fn pixel_ages(&self) -> Vec<u8> {
+        let w = self.decoded.ihdr.width as usize;
+        let h = self.decoded.ihdr.height as usize;
+        let mut ages = vec![0u8; w * h];
+
+        if self.decoded.ihdr.color_mode == ColorMode::Indexed {
+            for tile in &self.decoded.tiles {
+                let tx = tile.tx as usize;
+                let ty = tile.ty as usize;
+                let tile_ages = tile.pixel_ages();
+                for py in 0..TILE_SIZE {
+                    let dst_y = ty * TILE_SIZE + py;
+                    let dst_x = tx * TILE_SIZE;
+                    let src_start = py * TILE_SIZE;
+                    let dst_start = dst_y * w + dst_x;
+                    ages[dst_start..dst_start + TILE_SIZE]
+                        .copy_from_slice(&tile_ages[src_start..src_start + TILE_SIZE]);
+                }
+            }
+        }
+
+        ages
+    }
 }
 
 /// Encode raw RGBA pixels into a new .fmrl file using indexed mode (palette quantization).

@@ -249,13 +249,16 @@ fn encode_indexed(
         data_payload.extend_from_slice(color);
     }
 
-    // Per-tile: [u16 compressed_len LE][u8 flags][compressed full-byte data]
-    // Full bytes (no nibbles) for 16-color support
+    // Per-tile: [u16 compressed_len LE][u8 flags][compressed packed data]
+    // Packed format: high nibble = index (0-15), low nibble = age (0-15)
+    // 1 byte per pixel instead of 2
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
             let tile_indices = extract_tile_indices(&indices, w, tx, ty);
-            // No nibble packing - use full bytes directly
-            let compressed = zlib_compress(&tile_indices)?;
+            let tile_ages = extract_tile_ages(&pixel_ages, w, tx, ty);
+            // Pack index + age into one byte per pixel
+            let packed = pack_tile_data(&tile_indices, &tile_ages);
+            let compressed = zlib_compress(&packed)?;
             let len = compressed.len() as u16;
             data_payload.extend_from_slice(&len.to_le_bytes());
             data_payload.push(0u8); // flags
@@ -315,4 +318,24 @@ fn extract_tile_indices(indices: &[u8], width: usize, tx: usize, ty: usize) -> V
         tile.extend_from_slice(&indices[row_start..row_start + TILE_SIZE]);
     }
     tile
+}
+
+fn extract_tile_ages(ages: &[u8], width: usize, tx: usize, ty: usize) -> Vec<u8> {
+    let mut tile = Vec::with_capacity(TILE_SIZE * TILE_SIZE);
+    let x_start = tx * TILE_SIZE;
+    let y_start = ty * TILE_SIZE;
+    for y in y_start..y_start + TILE_SIZE {
+        let row_start = y * width + x_start;
+        tile.extend_from_slice(&ages[row_start..row_start + TILE_SIZE]);
+    }
+    tile
+}
+
+/// Pack tile indices and ages into one byte per pixel.
+/// High nibble (4 bits) = index (0-15), low nibble (4 bits) = age (0-15).
+fn pack_tile_data(indices: &[u8], ages: &[u8]) -> Vec<u8> {
+    assert_eq!(indices.len(), ages.len());
+    indices.iter().zip(ages.iter())
+        .map(|(&idx, &age)| (idx << 4) | (age & 0x0F))
+        .collect()
 }

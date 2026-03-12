@@ -44,9 +44,16 @@ impl TileData {
     }
 
     /// Get data as palette indices (panics if not indexed)
-    pub fn indices(&self) -> &[u8] {
+    /// Unpacks from high nibble of packed format.
+    pub fn indices(&self) -> Vec<u8> {
         assert_eq!(self.data.len(), TILE_SIZE * TILE_SIZE, "not indexed mode");
-        &self.data
+        self.data.iter().map(|&packed| packed >> 4).collect()
+    }
+
+    /// Get ages from packed data (low nibble)
+    pub fn pixel_ages(&self) -> Vec<u8> {
+        assert_eq!(self.data.len(), TILE_SIZE * TILE_SIZE, "not indexed mode");
+        self.data.iter().map(|&packed| packed & 0x0F).collect()
     }
 
     /// Get data as RGBA pixels (panics if not RGBA)

@@ -113,6 +113,18 @@ export class FmrlView {
         return FmrlView.__wrap(ret[0]);
     }
     /**
+     * Returns per-pixel ages extracted from packed tile data.
+     * For indexed mode: unpacks low nibble from packed format.
+     * For RGBA mode: returns zeros (no per-pixel ages stored).
+     * @returns {Uint8Array}
+     */
+    pixel_ages() {
+        const ret = wasm.fmrlview_pixel_ages(this.__wbg_ptr);
+        var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v1;
+    }
+    /**
      * Number of times this image has been viewed (using fade_level of tile 0 as proxy).
      * @returns {number}
      */

@@ -24,6 +24,7 @@ export const fmrlview_height: (a: number) => number;
 export const fmrlview_is_rgba: (a: number) => number;
 export const fmrlview_last_view_ms: (a: number) => number;
 export const fmrlview_new: (a: number, b: number) => [number, number, number];
+export const fmrlview_pixel_ages: (a: number) => [number, number];
 export const fmrlview_view_count: (a: number) => number;
 export const fmrlview_width: (a: number) => number;
 export const __wbindgen_externrefs: WebAssembly.Table;
