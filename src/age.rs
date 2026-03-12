@@ -106,14 +106,15 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
     next
 }
 
-/// Apply one consolidation step using per-tile AGE data with per-pixel "newness" detection.
+/// Apply one consolidation step.
 ///
-/// Block size increases with consolidation_level: 2×2 → 3×3 → 4×4 → 6×6 → 8×8 → ...
-/// Pixels surrounded by paper are treated as "new" (age 0) regardless of tile age.
-/// This allows new drawings to start fresh with small blocks.
+/// Divides the image into N×N blocks. Each block becomes a single color:
+/// - The most common color in the block wins
+/// - Ties go to the lowest index (so paper wins ties)
+/// - Block size N grows with age: 2→4→8→16→32...
 ///
-/// `age_levels` maps each tile to its consolidation level (0=initial, 1=next size, etc.)
-/// Returns the consolidated indices and updated age levels.
+/// This creates larger uniform areas with each step, genuinely reducing information.
+/// Features gradually merge and eventually become paper when surrounded.
 pub fn consolidation_step_with_age(
     indices: &[u8],
     width: usize,
@@ -129,128 +130,44 @@ pub fn consolidation_step_with_age(
         age_levels.fill(0);
     }
 
+    // Calculate block size from max tile age
+    // Each age level doubles the block size: 0=2x2, 1=4x4, 2=8x8, etc.
+    let max_age = age_levels.iter().copied().max().unwrap_or(0);
+    let shift = (max_age + 1).min(5);  // Cap at 32x32 blocks (shift 5 = 32)
+    let block_size = 1usize << shift;  // 2, 4, 8, 16, 32
+
+    // Process the entire image in fixed blocks
     let mut result = indices.to_vec();
 
-    // First pass: identify "new" pixels (surrounded by paper)
-    // These get age 0 treatment
-    let mut is_new_pixel = vec![false; width * height];
-    for y in 1..height - 1 {
-        for x in 1..width - 1 {
-            let idx = y * width + x;
-            if indices[idx] != 0 {
-                // Check if surrounded by paper (at least 6 of 8 neighbors are paper)
-                let mut paper_neighbors = 0;
-                for dy in -1..=1 {
-                    for dx in -1..=1 {
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
-                        let nx = x as isize + dx;
-                        let ny = y as isize + dy;
-                        if result[ny as usize * width + nx as usize] == 0 {
-                            paper_neighbors += 1;
-                        }
-                    }
-                }
-                if paper_neighbors >= 6 {
-                    is_new_pixel[idx] = true;
+    for y in (0..height).step_by(block_size) {
+        for x in (0..width).step_by(block_size) {
+            let y_end = (y + block_size).min(height);
+            let x_end = (x + block_size).min(width);
+
+            // Count colors in this block
+            let mut counts = [0u16; 16];
+            for by in y..y_end {
+                for bx in x..x_end {
+                    let idx = result[by * width + bx];
+                    counts[idx as usize] += 1;
                 }
             }
-        }
-    }
 
-    // Build list of pixels to process with their effective age and edge score
-    // "New" pixels use age 0, others use their tile's age
-    // Edge score: how many paper neighbors (pixels on edges of features consolidate first)
-    #[derive(Clone, Copy)]
-    struct PixelInfo {
-        idx: usize,
-        age: u8,
-        x: usize,
-        y: usize,
-        paper_neighbors: u8,  // 0-8, higher = more likely to become paper
-    }
-    let mut pixels_to_process: Vec<PixelInfo> = Vec::new();
-    for y in 1..height - 1 {
-        for x in 1..width - 1 {
-            let idx = y * width + x;
-            if indices[idx] != 0 {
-                // Count paper neighbors
-                let mut paper_count = 0u8;
-                for dy in -1..=1 {
-                    for dx in -1..=1 {
-                        if dx == 0 && dy == 0 { continue; }
-                        let nx = x as isize + dx;
-                        let ny = y as isize + dy;
-                        if result[ny as usize * width + nx as usize] == 0 {
-                            paper_count += 1;
-                        }
-                    }
+            // Find most common (lowest index wins ties)
+            let mut best_idx = 0u8;
+            let mut best_count = counts[0];
+            for i in 1..16 {
+                if counts[i] > best_count {
+                    best_count = counts[i];
+                    best_idx = i as u8;
                 }
-
-                let tx = x / TILE_SIZE;
-                let ty = y / TILE_SIZE;
-                let tile_idx = ty * tiles_x + tx;
-                let effective_age = if is_new_pixel[idx] { 0 } else { age_levels[tile_idx] };
-                pixels_to_process.push(PixelInfo { idx, age: effective_age, x, y, paper_neighbors: paper_count });
             }
-        }
-    }
 
-    // Sort by: (age, -paper_neighbors) - youngest pixels with most paper neighbors first
-    // This makes edges erode before centers, giving gradual disappearance
-    pixels_to_process.sort_by(|a, b| {
-        a.age.cmp(&b.age)
-            .then_with(|| b.paper_neighbors.cmp(&a.paper_neighbors))
-    });
-
-    // Process pixels - for gentler aging, use edge-first processing
-    // where edge pixels (surrounded by paper) consolidate first
-    for PixelInfo { age, x: px, y: py, .. } in pixels_to_process {
-        // Calculate block size based on age
-        // age 0 -> 2x2, age 1 -> 2x2, age 2 -> 3x3, age 3 -> 3x3, age 4 -> 4x4...
-        // Much more gradual progression
-        let block_size = match age {
-            0 | 1 => 2,
-            2 | 3 => 3,
-            4 | 5 => 4,
-            6 | 7 => 6,
-            8 | 9 => 8,
-            10 | 11 => 12,
-            _ => 16,
-        };
-
-        // Calculate block bounds centered on this pixel
-        let half_block = block_size / 2;
-        let x_start = px.saturating_sub(half_block);
-        let y_start = py.saturating_sub(half_block);
-        let x_end = (px + half_block + block_size % 2).min(width);
-        let y_end = (py + half_block + block_size % 2).min(height);
-
-        // Count colors in the block
-        let mut counts = [0u16; 16];
-        let block_area = (y_end - y_start) * (x_end - x_start);
-        for y in y_start..y_end {
-            for x in x_start..x_end {
-                let idx = result[y * width + x];
-                counts[idx as usize] += 1;
-            }
-        }
-
-        // Find most common color (lowest index wins ties)
-        let mut best_idx = 0u8;
-        let mut best_count = counts[0];
-        for i in 1..16 {
-            if counts[i] > best_count {
-                best_count = counts[i];
-                best_idx = i as u8;
-            }
-        }
-
-        // Fill block with consolidated value
-        for y in y_start..y_end {
-            for x in x_start..x_end {
-                result[y * width + x] = best_idx;
+            // Fill block with consolidated value
+            for by in y..y_end {
+                for bx in x..x_end {
+                    result[by * width + bx] = best_idx;
+                }
             }
         }
     }
@@ -262,12 +179,13 @@ pub fn consolidation_step_with_age(
             let tx0 = tx * TILE_SIZE;
             let ty0 = ty * TILE_SIZE;
 
-            // Check if tile became all paper
+            // Check if tile is all paper
             let mut all_paper = true;
             let mut has_content = false;
             for y in 0..TILE_SIZE {
                 for x in 0..TILE_SIZE {
-                    if result[(ty0 + y) * width + (tx0 + x)] != 0 {
+                    let val = result[(ty0 + y) * width + (tx0 + x)];
+                    if val != 0 {
                         all_paper = false;
                         has_content = true;
                     }
