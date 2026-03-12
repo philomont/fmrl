@@ -304,6 +304,31 @@ html, body {
   color: var(--text);
 }
 
+/* Aging technique selector */
+#age-type-select {
+  appearance: none;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0.3rem 0.5rem;
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  cursor: pointer;
+  min-width: 100px;
+}
+#age-type-select:hover {
+  border-color: var(--text-dim);
+}
+#age-type-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+#age-type-select option {
+  background: var(--surface);
+  color: var(--text);
+}
+
 /* Color picker panel - floating above action bar */
 .color-picker-panel {
   position: fixed;

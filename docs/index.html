@@ -43,8 +43,8 @@
     </div>
     <div class="bar-sep"></div>
     <div class="bar-group">
-      <label class="bar-label">Aging:</label>
-      <select id="age-type-select" class="bar-btn" title="Aging algorithm">
+      <label class="bar-label">Aging Technique:</label>
+      <select id="age-type-select" title="Aging algorithm">
         <option value="0">Erosion</option>
         <option value="1">Consolidation</option>
       </select>
@@ -59,7 +59,9 @@
       <input type="file" id="file-input" accept=".fmrl" />
     </label>
     <div class="bar-sep"></div>
-    <select id="theme-select" class="bar-btn" title="Change theme">
+    <div class="bar-group">
+      <label class="bar-label">Theme:</label>
+      <select id="theme-select" title="Change theme">
       <option value="default">Default</option>
       <option value="retro">Retro</option>
       <option value="vintage">Vintage</option>
@@ -67,6 +69,7 @@
       <option value="zen">Zen</option>
       <option value="custom" disabled hidden>Custom</option>
     </select>
+    </div>
 
     <!-- Color picker panel - positioned above action bar -->
     <div id="color-picker-panel" class="color-picker-panel">
