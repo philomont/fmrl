@@ -2,7 +2,7 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::age::{age_step, consolidation_step};
+use crate::age::{age_step, consolidation_step, consolidation_step_with_pixel_ages};
 use crate::decode::{DecodedFmrl, decode};
 use crate::encode::{FmrlImage, encode};
 use crate::format::{AgeType, ColorMode, Palette, TILE_SIZE};
@@ -267,14 +267,50 @@ fn quantize_to_palette(r: u8, g: u8, b: u8, a: u8) -> u8 {
     color_idx
 }
 
-/// Apply one aging step to flat palette indices and return the result.
-///
-/// `data` must be `width * height` bytes of palette indices (0–3; 1 = paper).
-/// Returns a new array of the same length with aged indices.
-/// See `age::age_step` for the full algorithm description.
+/// Encode raw RGBA pixels with age type, age levels, and per-pixel ages.
+/// `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+/// `age_levels`: per-tile consolidation levels (empty = start fresh)
+/// `pixel_ages`: per-pixel ages (empty = use tile-level ages, must be width*height bytes)
 #[wasm_bindgen]
-pub fn age_step_indices(data: &[u8], width: u16, height: u16) -> Vec<u8> {
-    age_step(data, width as usize, height as usize)
+pub fn encode_rgba_with_pixel_ages(
+    rgba: &[u8],
+    width: u16,
+    height: u16,
+    age_type: u8,
+    age_levels: &[u8],
+    pixel_ages: &[u8],
+) -> Result<Vec<u8>, JsValue> {
+    let now = js_sys::Date::now() as u64;
+    let mut image = FmrlImage::new(width, height, rgba.to_vec());
+    image.age_type = AgeType::from_u8(age_type).unwrap_or(AgeType::Erosion);
+    if !age_levels.is_empty() {
+        image.age_levels = Some(age_levels.to_vec());
+    }
+    if !pixel_ages.is_empty() {
+        image.pixel_ages = Some(pixel_ages.to_vec());
+    }
+    encode(&image, now).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Apply one consolidation step with per-pixel ages.
+/// Returns [indices_out, pixel_ages_out] as a single concatenated array.
+/// indices_out is width*height bytes, pixel_ages_out is width*height bytes.
+#[wasm_bindgen]
+pub fn consolidation_step_with_ages(
+    indices: &[u8],
+    pixel_ages: &[u8],
+    width: u16,
+    height: u16,
+) -> Vec<u8> {
+    let w = width as usize;
+    let h = height as usize;
+    let (new_indices, new_ages) = consolidation_step_with_pixel_ages(indices, pixel_ages, w, h);
+
+    // Concatenate results: indices first, then ages
+    let mut result = Vec::with_capacity(w * h * 2);
+    result.extend_from_slice(&new_indices);
+    result.extend_from_slice(&new_ages);
+    result
 }
 
 /// Apply one consolidation step: reduce resolution by 2× then upscale back.

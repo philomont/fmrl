@@ -3,7 +3,7 @@ use std::io::Write;
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 
-use crate::age::{age_step, consolidation_step_with_age};
+use crate::age::{age_step, consolidation_step_with_age, consolidation_step_with_pixel_ages};
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
@@ -22,6 +22,9 @@ pub struct FmrlImage {
     pub age_type: AgeType,
     /// Optional per-tile consolidation levels (for re-saving existing files)
     pub age_levels: Option<Vec<u8>>,
+    /// Optional per-pixel ages (width*height bytes) for independent pixel aging
+    /// If None, tile-level ages are used
+    pub pixel_ages: Option<Vec<u8>>,
     pub meta: Option<serde_json::Value>,
 }
 
@@ -37,6 +40,7 @@ impl FmrlImage {
             decay_policy: 0,
             age_type: AgeType::Erosion,
             age_levels: None,
+            pixel_ages: None,
             meta: None,
         }
     }
@@ -52,6 +56,7 @@ impl FmrlImage {
             decay_policy: 0,
             age_type: AgeType::Erosion,
             age_levels: None,
+            pixel_ages: None,
             meta: None,
         }
     }
@@ -193,12 +198,42 @@ fn encode_indexed(
     // Step 2: apply one aging step based on age_type
     let mut age_levels = image.age_levels.clone().unwrap_or_else(|| vec![0u8; tiles_x * tiles_y]);
 
+    // Get or initialize per-pixel ages
+    let mut pixel_ages = image.pixel_ages.clone().unwrap_or_else(|| vec![0u8; w * h]);
+
     indices = match image.age_type {
         AgeType::Erosion => {
             age_step(&indices, w, h)
         }
         AgeType::Consolidation => {
-            consolidation_step_with_age(&indices, w, h, &mut age_levels)
+            // Use per-pixel ages if available
+            if image.pixel_ages.is_some() {
+                let (new_indices, new_pixel_ages) = consolidation_step_with_pixel_ages(
+                    &indices, &pixel_ages, w, h
+                );
+                // Compute tile-level ages from per-pixel ages (max age in tile)
+                for ty in 0..tiles_y {
+                    for tx in 0..tiles_x {
+                        let tile_idx = ty * tiles_x + tx;
+                        let tx0 = tx * TILE_SIZE;
+                        let ty0 = ty * TILE_SIZE;
+                        let mut max_age = 0u8;
+                        for y in 0..TILE_SIZE {
+                            for x in 0..TILE_SIZE {
+                                let age = new_pixel_ages[(ty0 + y) * w + (tx0 + x)];
+                                if age > max_age {
+                                    max_age = age;
+                                }
+                            }
+                        }
+                        age_levels[tile_idx] = max_age;
+                    }
+                }
+                pixel_ages = new_pixel_ages;
+                new_indices
+            } else {
+                consolidation_step_with_age(&indices, w, h, &mut age_levels)
+            }
         }
         AgeType::Noise => {
             // TODO: implement noise-based aging

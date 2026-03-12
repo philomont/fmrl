@@ -131,26 +131,6 @@ export class FmrlView {
 if (Symbol.dispose) FmrlView.prototype[Symbol.dispose] = FmrlView.prototype.free;
 
 /**
- * Apply one aging step to flat palette indices and return the result.
- *
- * `data` must be `width * height` bytes of palette indices (0–3; 1 = paper).
- * Returns a new array of the same length with aged indices.
- * See `age::age_step` for the full algorithm description.
- * @param {Uint8Array} data
- * @param {number} width
- * @param {number} height
- * @returns {Uint8Array}
- */
-export function age_step_indices(data, width, height) {
-    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.age_step_indices(ptr0, len0, width, height);
-    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v2;
-}
-
-/**
  * Apply one consolidation step: reduce resolution by 2× then upscale back.
  *
  * `data` must be `width * height` bytes of palette indices.
@@ -169,6 +149,27 @@ export function consolidation_step_indices(data, width, height) {
     var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v2;
+}
+
+/**
+ * Apply one consolidation step with per-pixel ages.
+ * Returns [indices_out, pixel_ages_out] as a single concatenated array.
+ * indices_out is width*height bytes, pixel_ages_out is width*height bytes.
+ * @param {Uint8Array} indices
+ * @param {Uint8Array} pixel_ages
+ * @param {number} width
+ * @param {number} height
+ * @returns {Uint8Array}
+ */
+export function consolidation_step_with_ages(indices, pixel_ages, width, height) {
+    const ptr0 = passArray8ToWasm0(indices, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(pixel_ages, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.consolidation_step_with_ages(ptr0, len0, ptr1, len1, width, height);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
 }
 
 /**
@@ -333,6 +334,35 @@ export function encode_rgba_with_age_and_levels(rgba, width, height, age_type, a
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;
+}
+
+/**
+ * Encode raw RGBA pixels with age type, age levels, and per-pixel ages.
+ * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+ * `age_levels`: per-tile consolidation levels (empty = start fresh)
+ * `pixel_ages`: per-pixel ages (empty = use tile-level ages, must be width*height bytes)
+ * @param {Uint8Array} rgba
+ * @param {number} width
+ * @param {number} height
+ * @param {number} age_type
+ * @param {Uint8Array} age_levels
+ * @param {Uint8Array} pixel_ages
+ * @returns {Uint8Array}
+ */
+export function encode_rgba_with_pixel_ages(rgba, width, height, age_type, age_levels, pixel_ages) {
+    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(age_levels, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passArray8ToWasm0(pixel_ages, wasm.__wbindgen_malloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.encode_rgba_with_pixel_ages(ptr0, len0, width, height, age_type, ptr1, len1, ptr2, len2);
+    if (ret[3]) {
+        throw takeFromExternrefTable0(ret[2]);
+    }
+    var v4 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v4;
 }
 
 function __wbg_get_imports() {

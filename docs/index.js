@@ -1,10 +1,14 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices } from './pkg/fmrl.js';
+import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, encode_rgba_with_pixel_ages } from './pkg/fmrl.js';
 
 // Age type: 0 = erosion (default), 1 = consolidation
 let currentAgeType = 0;
 
 // Track age levels (consolidation levels) per tile - persists through encode/decode
 let currentAgeLevels = null;
+
+// Track per-pixel ages for independent aging (only for consolidation mode)
+// Each pixel has its own age: 0-4 (0=just drawn, 4=about to become paper)
+let currentPixelAges = null;
 
 // ── Canvas dimensions ───────────────────────────────────────────────────────
 
@@ -387,8 +391,13 @@ function paintAt(cx, cy) {
         for (let dx = -r; dx <= r; dx++) {
             if (dx * dx + dy * dy <= r * r + 0.5) {
                 const px = cx + dx, py = cy + dy;
-                if (px >= 0 && px < W && py >= 0 && py < H)
+                if (px >= 0 && px < W && py >= 0 && py < H) {
                     indices[py * W + px] = colorIdx;
+                    // Reset pixel age to 0 for newly drawn pixels (in consolidation mode)
+                    if (currentPixelAges) {
+                        currentPixelAges[py * W + px] = 0;
+                    }
+                }
             }
         }
     }
@@ -465,7 +474,33 @@ function _doAgeStep(src, full = true) {
 
 function applyAge(n = 1) {
     try {
-        // Age by encoding then decoding - aging happens during encode
+        // For consolidation mode, use per-pixel ages directly
+        if (currentAgeType === 1) {
+            // Initialize pixel ages if needed
+            if (!currentPixelAges || currentPixelAges.length !== W * H) {
+                currentPixelAges = new Uint8Array(W * H);
+            }
+
+            for (let i = 0; i < n; i++) {
+                // Apply one consolidation step with per-pixel ages
+                // Returns concatenated [indices, pixel_ages]
+                const result = consolidation_step_with_ages(indices, currentPixelAges, W, H);
+                const pixelCount = W * H;
+
+                // Extract updated indices and pixel ages
+                indices = new Uint8Array(result.slice(0, pixelCount));
+                currentPixelAges = new Uint8Array(result.slice(pixelCount, pixelCount * 2));
+            }
+
+            // Update tile-level age levels from per-pixel ages (max age per tile)
+            updateTileAgeLevelsFromPixelAges();
+
+            render();
+            updateMetric();
+            return;
+        }
+
+        // For erosion mode, use the encode/decode cycle
         // Age levels persist through the cycle
         for (let i = 0; i < n; i++) {
             // Convert current indices to RGBA for encoding
@@ -488,6 +523,32 @@ function applyAge(n = 1) {
         updateMetric();
     } catch (e) {
         console.error('Age failed:', e);
+    }
+}
+
+// Update tile-level age levels from per-pixel ages (max age per tile)
+function updateTileAgeLevelsFromPixelAges() {
+    const tilesX = W / 32;
+    const tilesY = H / 32;
+    currentAgeLevels = new Uint8Array(tilesX * tilesY);
+
+    for (let ty = 0; ty < tilesY; ty++) {
+        for (let tx = 0; tx < tilesX; tx++) {
+            let maxAge = 0;
+            const tileBase = ty * tilesX + tx;
+            const y0 = ty * 32;
+            const x0 = tx * 32;
+
+            for (let y = 0; y < 32; y++) {
+                for (let x = 0; x < 32; x++) {
+                    const pixelAge = currentPixelAges[(y0 + y) * W + (x0 + x)];
+                    if (pixelAge > maxAge) {
+                        maxAge = pixelAge;
+                    }
+                }
+            }
+            currentAgeLevels[tileBase] = maxAge;
+        }
     }
 }
 
@@ -719,8 +780,13 @@ function _blitText(text) {
         const bw  = x1 - x0, bh = y1 - y0;
         for (let row = 0; row < bh; row++) {
             for (let col = 0; col < bw; col++) {
-                if (img.data[(row * bw + col) * 4 + 3] > 64)
+                if (img.data[(row * bw + col) * 4 + 3] > 64) {
                     indices[(y0 + row) * W + (x0 + col)] = colorIdx;
+                    // Reset pixel age to 0 for newly drawn text (in consolidation mode)
+                    if (currentPixelAges) {
+                        currentPixelAges[(y0 + row) * W + (x0 + col)] = 0;
+                    }
+                }
             }
         }
     }
@@ -807,7 +873,17 @@ function saveFmrl() {
     try {
         // Encode current canvas state using grayscale (theme-independent storage)
         // Use current age type (0=erosion, 1=fade, 2=noise)
-        const bytes = encode_rgba_with_age(indicesToGrayscaleRgba(indices), W, H, currentAgeType);
+        let bytes;
+        const rgba = indicesToGrayscaleRgba(indices);
+        const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
+
+        if (currentAgeType === 1 && currentPixelAges && currentPixelAges.length > 0) {
+            // For consolidation mode with per-pixel ages, use the new encoder
+            bytes = encode_rgba_with_pixel_ages(rgba, W, H, currentAgeType, ageLevelsArray, currentPixelAges);
+        } else {
+            // For other modes or when no pixel ages, use standard encoder
+            bytes = encode_rgba_with_age_and_levels(rgba, W, H, currentAgeType, ageLevelsArray);
+        }
 
         // Save FMRL file
         const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
@@ -905,6 +981,29 @@ function loadFmrl(arrayBuffer) {
 
         // Decode without additional aging (file already contains aged data)
         indices  = new Uint8Array(decode_to_indices(bytes));
+
+        // Initialize per-pixel ages from tile ages
+        // Each pixel in a tile gets the tile's age
+        if (currentAgeType === 1 && currentAgeLevels) {
+            const tilesX = W / 32;
+            const tilesY = H / 32;
+            currentPixelAges = new Uint8Array(W * H);
+            for (let ty = 0; ty < tilesY; ty++) {
+                for (let tx = 0; tx < tilesX; tx++) {
+                    const tileAge = currentAgeLevels[ty * tilesX + tx] || 0;
+                    const y0 = ty * 32;
+                    const x0 = tx * 32;
+                    for (let y = 0; y < 32; y++) {
+                        for (let x = 0; x < 32; x++) {
+                            currentPixelAges[(y0 + y) * W + (x0 + x)] = tileAge;
+                        }
+                    }
+                }
+            }
+        } else {
+            currentPixelAges = null;
+        }
+
         render();
         lastMetricSize = 0;
         blankSize = 0;
@@ -1070,6 +1169,7 @@ async function main() {
         setTextMode(false);
         indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
         currentAgeLevels = null; // Reset age levels on clear
+        currentPixelAges = null; // Reset pixel ages on clear
     });
     document.getElementById('btn-save').addEventListener('click', saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
