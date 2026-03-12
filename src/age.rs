@@ -210,6 +210,7 @@ pub fn consolidation_step_with_age(
 
         // Count colors in the block
         let mut counts = [0u16; 16];
+        let block_area = (y_end - y_start) * (x_end - x_start);
         for y in y_start..y_end {
             for x in x_start..x_end {
                 let idx = result[y * width + x];
@@ -217,22 +218,30 @@ pub fn consolidation_step_with_age(
             }
         }
 
-        // Find most common (lowest index wins ties)
-        let mut best_idx = 0u8;
-        let mut best_count = counts[0];
-        for i in 1..16 {
-            if counts[i] > best_count {
-                best_count = counts[i];
-                best_idx = i as u8;
-            }
-        }
+        // Count non-paper pixels
+        let non_paper_count = block_area - counts[0] as usize;
 
-        // Fill block with consolidated value
-        for y in y_start..y_end {
-            for x in x_start..x_end {
-                result[y * width + x] = best_idx;
+        // Only consolidate if majority is non-paper (gentler than "most common")
+        // This prevents thin features from disappearing immediately
+        if non_paper_count > block_area / 2 {
+            // Find most common non-paper color
+            let mut best_idx = 1u8;
+            let mut best_count = counts[1];
+            for i in 2..16 {
+                if counts[i] > best_count {
+                    best_count = counts[i];
+                    best_idx = i as u8;
+                }
+            }
+
+            // Fill block with consolidated value
+            for y in y_start..y_end {
+                for x in x_start..x_end {
+                    result[y * width + x] = best_idx;
+                }
             }
         }
+        // If majority is paper, leave the block as-is (don't expand paper)
     }
 
     // Update tile ages
