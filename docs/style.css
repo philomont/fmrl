@@ -279,6 +279,14 @@ html, body {
   white-space: nowrap;
 }
 
+/* Bar label styling */
+.bar-label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* Theme selector */
 #theme-select {
   appearance: none;
@@ -299,7 +307,9 @@ html, body {
   outline: none;
   border-color: var(--accent);
 }
-#theme-select option {
+/* Dropdown options styling - combined for both selects */
+#theme-select option,
+#age-type-select option {
   background: var(--surface);
   color: var(--text);
 }
