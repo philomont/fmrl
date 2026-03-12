@@ -159,46 +159,65 @@ pub fn consolidation_step_with_age(
         }
     }
 
-    // Build list of pixels to process with their effective age
+    // Build list of pixels to process with their effective age and edge score
     // "New" pixels use age 0, others use their tile's age
+    // Edge score: how many paper neighbors (pixels on edges of features consolidate first)
     #[derive(Clone, Copy)]
     struct PixelInfo {
         idx: usize,
         age: u8,
         x: usize,
         y: usize,
+        paper_neighbors: u8,  // 0-8, higher = more likely to become paper
     }
     let mut pixels_to_process: Vec<PixelInfo> = Vec::new();
-    for y in 0..height {
-        for x in 0..width {
+    for y in 1..height - 1 {
+        for x in 1..width - 1 {
             let idx = y * width + x;
             if indices[idx] != 0 {
+                // Count paper neighbors
+                let mut paper_count = 0u8;
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        if dx == 0 && dy == 0 { continue; }
+                        let nx = x as isize + dx;
+                        let ny = y as isize + dy;
+                        if result[ny as usize * width + nx as usize] == 0 {
+                            paper_count += 1;
+                        }
+                    }
+                }
+
                 let tx = x / TILE_SIZE;
                 let ty = y / TILE_SIZE;
                 let tile_idx = ty * tiles_x + tx;
                 let effective_age = if is_new_pixel[idx] { 0 } else { age_levels[tile_idx] };
-                pixels_to_process.push(PixelInfo { idx, age: effective_age, x, y });
+                pixels_to_process.push(PixelInfo { idx, age: effective_age, x, y, paper_neighbors: paper_count });
             }
         }
     }
 
-    // Sort by effective age ascending (youngest first)
-    pixels_to_process.sort_by(|a, b| a.age.cmp(&b.age));
+    // Sort by: (age, -paper_neighbors) - youngest pixels with most paper neighbors first
+    // This makes edges erode before centers, giving gradual disappearance
+    pixels_to_process.sort_by(|a, b| {
+        a.age.cmp(&b.age)
+            .then_with(|| b.paper_neighbors.cmp(&a.paper_neighbors))
+    });
 
-    // Process pixels in order
+    // Process pixels - for gentler aging, use edge-first processing
+    // where edge pixels (surrounded by paper) consolidate first
     for PixelInfo { age, x: px, y: py, .. } in pixels_to_process {
-        // Calculate block size based on age: gradual increase
-        // age 0 -> 2, age 1 -> 3, age 2 -> 4, age 3 -> 6, age 4 -> 8, age 5 -> 12, age 6 -> 16...
+        // Calculate block size based on age
+        // age 0 -> 2x2, age 1 -> 2x2, age 2 -> 3x3, age 3 -> 3x3, age 4 -> 4x4...
+        // Much more gradual progression
         let block_size = match age {
-            0 => 2,
-            1 => 3,
-            2 => 4,
-            3 => 6,
-            4 => 8,
-            5 => 12,
-            6 => 16,
-            7 => 24,
-            _ => 32,
+            0 | 1 => 2,
+            2 | 3 => 3,
+            4 | 5 => 4,
+            6 | 7 => 6,
+            8 | 9 => 8,
+            10 | 11 => 12,
+            _ => 16,
         };
 
         // Calculate block bounds centered on this pixel
@@ -218,30 +237,22 @@ pub fn consolidation_step_with_age(
             }
         }
 
-        // Count non-paper pixels
-        let non_paper_count = block_area - counts[0] as usize;
-
-        // Only consolidate if majority is non-paper (gentler than "most common")
-        // This prevents thin features from disappearing immediately
-        if non_paper_count > block_area / 2 {
-            // Find most common non-paper color
-            let mut best_idx = 1u8;
-            let mut best_count = counts[1];
-            for i in 2..16 {
-                if counts[i] > best_count {
-                    best_count = counts[i];
-                    best_idx = i as u8;
-                }
-            }
-
-            // Fill block with consolidated value
-            for y in y_start..y_end {
-                for x in x_start..x_end {
-                    result[y * width + x] = best_idx;
-                }
+        // Find most common color (lowest index wins ties)
+        let mut best_idx = 0u8;
+        let mut best_count = counts[0];
+        for i in 1..16 {
+            if counts[i] > best_count {
+                best_count = counts[i];
+                best_idx = i as u8;
             }
         }
-        // If majority is paper, leave the block as-is (don't expand paper)
+
+        // Fill block with consolidated value
+        for y in y_start..y_end {
+            for x in x_start..x_end {
+                result[y * width + x] = best_idx;
+            }
+        }
     }
 
     // Update tile ages
