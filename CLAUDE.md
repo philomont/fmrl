@@ -1,0 +1,168 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+**FMRL** ("Fragile Manuscript Record Layer") is an ephemeral media codec and file format (`.fmrl`) where visual degradation is a core design feature. Images decay over time and with repeated access — simulating the natural aging of physical media. This is intentional art/archival design, not a bug.
+
+## Tech Stack
+
+- **Core codec**: Rust (primary implementation)
+- **Web platform**: WebAssembly via `wasm-pack` + `wasm-bindgen`
+- **Compression**: `flate2` crate (zlib/DEFLATE, same as PNG)
+- **Mobile**: Rust WASM → iOS (WasmKit) / Android (wasm3 runtime) — future
+- **CLI**: Cargo binary target — future
+
+## Build Commands
+
+```bash
+# Build WebAssembly module
+wasm-pack build --target web
+
+# Build and test Rust library
+cargo build
+cargo test
+cargo test <test_name>   # Run a single test
+
+# Lint
+cargo clippy
+
+# Serve web demo locally
+npx serve -l 3000 wasm/
+# or
+python -m http.server 3000 --directory wasm/
+```
+
+## Architecture
+
+### File Format — `.fmrl` (PNG-like chunked binary)
+
+| Chunk | Contents |
+|-------|----------|
+| `IHDR` | Width, height, color mode, decay policy, **age_type** (11 bytes) |
+| `DATA` | Indexed: palette (48B) + tile data; RGBA: paper color (3B) + raw RGBA tiles |
+| `AGE`  | Per-tile metadata: `last_view`, `fade_level` (consolidation level), `noise_seed`, `edge_damage` |
+| `ORIG` | Optional: original strokes for reconstruction |
+| `META` | Optional: JSON metadata (`author`, `tags`, `decay_rate`) |
+| `IEND` | Terminator |
+
+**Color Types**:
+- `3` = Indexed (16-color palette)
+- `6` = RGBA (full 8-bit per channel)
+
+**Age Types** (stored in IHDR byte 10):
+- `0` = Erosion (morphological erosion)
+- `1` = Consolidation (progressive block merging)
+- `2` = Noise (Perlin degradation — reserved)
+
+### Encoding Pipeline
+
+```
+Raw Pixels
+  → 4-color palette quantization (fixed indexed colors)
+  → 32×32 tile partitioning
+  → RLE + zlib/DEFLATE per tile
+  → .fmrl binary (chunked)
+```
+
+### Aging Architecture (v0.4.0+)
+
+**All aging happens during encoding**. The codec applies aging algorithms as part of the save process. The workflow is:
+
+```
+Canvas State (RGBA)
+  → Encode (apply aging algorithm)
+    → Quantize to palette indices
+    → Apply age_step (erosion) or consolidation_step (block merging)
+    → Update AGE chunk metadata
+    → Compress tiles
+  → Save .fmrl file
+  → Decode (display only, no aging)
+    → Decompress tiles
+    → Map indices to theme colors
+  → Render to canvas
+```
+
+**To age the canvas**: The web app/tool re-encodes the current state. Each save cycle applies one aging step based on the file's `age_type`:
+- **Erosion** (`age_type=0`): Morphological erosion + short-run elimination
+- **Consolidation** (`age_type=1`): Progressive block merging (2×2 → 4×4 → 8×8 → ...)
+
+The AGE chunk stores per-tile consolidation levels in `fade_level`, allowing progressive degradation across save/load cycles.
+
+### Decay Model
+
+- **Aging at encode time**: All degradation happens during `encode()`, not during display
+- **Per-tile age tracking**: `AGE.fade_level` stores consolidation level (0=initial, 1=2×2 done, 2=4×4 done, etc.)
+- **Content-first aging**: Tiles with non-paper content are prioritized for aging
+- **Deterministic degradation**: Same input + same age levels → identical output
+- **Information reduction**: Each aging step reduces file size by creating larger uniform areas
+
+### Web App / Tool Role
+
+The web demo (`docs/index.html`, `docs/index.js`) is a **display tool only**:
+- Drawing operations modify the canvas directly
+- **Age button**: Triggers save → load cycle (encode → decode → display)
+- **Save button**: Encodes with current age_type, downloads `.fmrl` file
+- **Load button**: Decodes file, displays on canvas (no aging applied)
+
+Aging algorithms live in Rust (`src/age.rs`):
+- `age_step()` — erosion-based aging
+- `consolidation_step_with_age()` — progressive block consolidation
+
+### Source Layout
+
+```
+src/
+  lib.rs      # Core encoder/decoder + public API
+  format.rs   # File format definitions: ColorMode, Palette, IHDR, AgeType, chunks, CRC
+  encode.rs   # Encoding: indexed/RGBA modes, quantization, aging algorithms
+  decode.rs   # Decoding: TileData with indices() and rgba() accessors
+  age.rs      # Aging algorithms: erosion_step, consolidation_step_with_age
+  decay.rs    # Rendering: temporal decay, fade-to-paper (legacy)
+  prng.rs     # xoshiro128++ per-tile deterministic PRNG
+  error.rs    # FmrlError enum for all error conditions
+  wasm.rs     # wasm-bindgen WASM bindings (FmrlView type, WASM exports)
+docs/
+  index.html  # Web demo with HTML5 Canvas (display only, no aging logic)
+  index.js    # Canvas drawing + WASM integration (calls encode/decode)
+  style.css
+  pkg/        # WASM build output (generated by wasm-pack)
+tests/
+  roundtrip.rs     # Encode/decode pixel comparison tests
+  chunk_parse.rs   # CRC validation, unknown chunks, EOF handling
+  decay_det.rs     # Decay determinism tests
+  age_mutation.rs  # In-place AGE mutation + CRC recompute
+  aging_decay.rs   # Aging algorithm convergence tests
+```
+
+### Color Modes
+
+FMRL supports two color modes:
+
+**Indexed Mode (v0.4.0 — 16-color)**:
+- 16-color palette (index 0 = paper, 1-15 = colors that age toward paper)
+- Full-byte storage per pixel (no packing, v0.3.0 used nibble packing)
+- Theme-agnostic: grayscale brightness maps to palette indices
+- Smaller file sizes than RGBA
+
+**RGBA Mode (Full Color)**:
+- Full 8-bit RGB + 8-bit alpha per pixel
+- Raw RGBA tile storage (compressed)
+- Larger files but preserves exact colors
+- Uniform decay (all pixels age equally)
+
+### WASM Surface
+
+The `wasm-bindgen`-exposed type is `FmrlView` with methods like:
+- `decode_and_decay()` — returns RGBA pixel data applying current decay state
+- `get_mutated_bytes()` — returns updated file bytes with new AGE state
+- `view_count()` — returns number of times the image has been viewed
+- `color_mode()` — returns color type (3 = indexed, 6 = RGBA)
+- `is_rgba()` — returns true if file uses RGBA mode
+
+**Encoding Functions**:
+- `encode_rgba()` — encode with indexed mode (palette quantization)
+- `encode_rgba_full()` — encode with RGBA mode (full color preservation)
+- `decode_to_indices()` — decode to palette indices (for editor loading)
+- `decode_to_rgba()` — decode to RGBA pixels (preserves full color)

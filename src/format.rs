@@ -16,9 +16,15 @@ pub const CHUNK_IEND: &[u8; 4] = b"IEND";
 pub const COLOR_TYPE_INDEXED: u8 = 3; // Palette-based, 4-color
 pub const COLOR_TYPE_RGBA: u8 = 6;    // Full RGBA (8-bit per channel)
 
+// Age types for different aging algorithms
+// All types must reduce information (file size decreases with each application)
+pub const AGE_TYPE_EROSION: u8 = 0;        // Morphological erosion (default)
+pub const AGE_TYPE_CONSOLIDATION: u8 = 1; // Neighbor consolidation: 32x32 → 16x16
+pub const AGE_TYPE_BLEACH: u8 = 2;       // Convolutional bleach: mixed/diagonal 2x2 → paper
+
 /// IHDR payload length: width(2) + height(2) + bit_depth(1) + color_type(1) +
-/// compression(1) + filter(1) + interlace(1) + decay_policy(1) = 10 bytes
-pub const IHDR_LEN: usize = 10;
+/// compression(1) + filter(1) + interlace(1) + decay_policy(1) + age_type(1) = 11 bytes
+pub const IHDR_LEN: usize = 11;
 
 /// AGE entry: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) +
 /// edge_damage(1) + reserved(2) + _pad(2) = 22 bytes
@@ -52,6 +58,40 @@ impl ColorMode {
     }
 }
 
+/// Age type for different aging algorithms.
+/// All variants must be information-reducing (file size decreases with each application).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AgeType {
+    /// Morphological erosion - erodes edges of strokes (default)
+    Erosion,
+    /// Neighbor consolidation: 2x2 blocks merge to 1 pixel,
+    /// tile resolution reduces 32x32 → 16x16
+    Consolidation,
+    /// Convolutional bleach: 2x2 blocks with mixed/diagonal patterns become paper
+    Bleach,
+}
+
+impl AgeType {
+    /// Convert to u8 for storage
+    pub fn as_u8(self) -> u8 {
+        match self {
+            AgeType::Erosion => AGE_TYPE_EROSION,
+            AgeType::Consolidation => AGE_TYPE_CONSOLIDATION,
+            AgeType::Bleach => AGE_TYPE_BLEACH,
+        }
+    }
+
+    /// Parse from u8
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            AGE_TYPE_EROSION => Some(AgeType::Erosion),
+            AGE_TYPE_CONSOLIDATION => Some(AgeType::Consolidation),
+            AGE_TYPE_BLEACH => Some(AgeType::Bleach),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IhdrChunk {
     pub width: u16,
@@ -62,10 +102,11 @@ pub struct IhdrChunk {
     pub filter: u8,
     pub interlace: u8,
     pub decay_policy: u8,
+    pub age_type: AgeType,
 }
 
 impl IhdrChunk {
-    pub fn new(width: u16, height: u16, color_mode: ColorMode, decay_policy: u8) -> Self {
+    pub fn new(width: u16, height: u16, color_mode: ColorMode, decay_policy: u8, age_type: AgeType) -> Self {
         IhdrChunk {
             width,
             height,
@@ -75,12 +116,13 @@ impl IhdrChunk {
             filter: 0,
             interlace: 0,
             decay_policy,
+            age_type,
         }
     }
 
     /// Create with default indexed color mode (backward compatible)
     pub fn new_indexed(width: u16, height: u16, decay_policy: u8) -> Self {
-        Self::new(width, height, ColorMode::Indexed, decay_policy)
+        Self::new(width, height, ColorMode::Indexed, decay_policy, AgeType::Erosion)
     }
 
     pub fn to_bytes(&self) -> [u8; IHDR_LEN] {
@@ -93,6 +135,7 @@ impl IhdrChunk {
         buf[7] = self.filter;
         buf[8] = self.interlace;
         buf[9] = self.decay_policy;
+        buf[10] = self.age_type.as_u8();
         buf
     }
 
@@ -102,6 +145,8 @@ impl IhdrChunk {
         }
         let color_mode = ColorMode::from_u8(b[5])
             .ok_or(FmrlError::MalformedChunk("unsupported color type"))?;
+        let age_type = AgeType::from_u8(b[10])
+            .ok_or(FmrlError::MalformedChunk("unsupported age type"))?;
         Ok(IhdrChunk {
             width: u16::from_be_bytes([b[0], b[1]]),
             height: u16::from_be_bytes([b[2], b[3]]),
@@ -111,6 +156,7 @@ impl IhdrChunk {
             filter: b[7],
             interlace: b[8],
             decay_policy: b[9],
+            age_type,
         })
     }
 }
@@ -158,21 +204,31 @@ impl AgeEntry {
     }
 }
 
-/// 4-color RGB palette
+/// Number of palette entries (16 for v0.4+ format)
+pub const PALETTE_SIZE: usize = 16;
+
+/// 16-color RGB palette (v0.4+ format)
+/// Index 0 is paper (white, doesn't age)
+/// Indices 1-15 are colors that age toward paper
 #[derive(Debug, Clone)]
-pub struct Palette(pub [[u8; 3]; 4]);
+pub struct Palette(pub [[u8; 3]; PALETTE_SIZE]);
 
 impl Default for Palette {
     fn default() -> Self {
-        // Grayscale storage palette for direct mapping:
-        // Each index has a unique grayscale value for deterministic quantization.
-        // Index 1 (paper) uses alpha=0 (transparent), so its RGB can be anything.
-        Palette([
-            [0, 0, 0],         // 0: ink - black
-            [255, 255, 255],   // 1: paper - white (transparent via alpha=0)
-            [255, 255, 255],   // 2: accent - full white (opaque)
-            [128, 128, 128],   // 3: highlight - 50% gray
-        ])
+        // Grayscale storage palette:
+        // Index 0 = paper (white, transparent, doesn't age)
+        // Index 1 = ink (black)
+        // Indices 2-15 = grayscale steps toward white
+        // Each step is 17 grayscale units (256/15 ≈ 17)
+        let mut colors = [[0u8; 3]; PALETTE_SIZE];
+        // Paper (index 0) - white, treated as transparent via alpha
+        colors[0] = [255, 255, 255];
+        // Color indices 1-15: black to almost-white
+        for i in 1..PALETTE_SIZE {
+            let gray = ((PALETTE_SIZE - i) * 17).min(255) as u8;
+            colors[i] = [gray, gray, gray];
+        }
+        Palette(colors)
     }
 }
 
@@ -243,30 +299,3 @@ pub fn write_chunk(out: &mut Vec<u8>, name: &[u8; 4], data: &[u8]) {
     out.extend_from_slice(&crc.to_be_bytes());
 }
 
-/// Pack palette indices into 4-bit nibbles (high=even pixel, low=odd pixel).
-/// Input length must be even; output is input.len()/2.
-pub fn pack_nibbles(indices: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(indices.len().div_ceil(2));
-    let mut i = 0;
-    while i < indices.len() {
-        let hi = if i < indices.len() { indices[i] & 0x0F } else { 0 };
-        let lo = if i + 1 < indices.len() { indices[i + 1] & 0x0F } else { 0 };
-        out.push((hi << 4) | lo);
-        i += 2;
-    }
-    out
-}
-
-/// Unpack 4-bit nibbles back into palette indices.
-pub fn unpack_nibbles(packed: &[u8], pixel_count: usize) -> Vec<u8> {
-    let mut out = Vec::with_capacity(pixel_count);
-    for &byte in packed {
-        out.push((byte >> 4) & 0x0F);
-        out.push(byte & 0x0F);
-        if out.len() >= pixel_count {
-            break;
-        }
-    }
-    out.truncate(pixel_count);
-    out
-}

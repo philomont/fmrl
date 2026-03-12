@@ -18,7 +18,9 @@ fn checkerboard_image(width: u16, height: u16) -> FmrlImage {
     let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
     for y in 0..height as usize {
         for x in 0..width as usize {
-            let idx = ((x + y) % 2) as usize;
+            // v0.4+: 0=paper (white), 1=ink (black)
+            // Checkerboard: even positions get ink (1), odd get paper (0)
+            let idx = if (x + y) % 2 == 0 { 1 } else { 0 };
             let [r, g, b] = palette.0[idx];
             pixels.extend_from_slice(&[r, g, b, 255]);
         }
@@ -30,7 +32,8 @@ fn checkerboard_image(width: u16, height: u16) -> FmrlImage {
 
 #[test]
 fn solid_roundtrip() {
-    let image = solid_image(0, 64, 64);
+    // Index 1 is ink (darkest) in v0.4+ format
+    let image = solid_image(1, 64, 64);
     let encoded = encode(&image, NOW_MS).expect("encode failed");
     let decoded = decode(&encoded).expect("decode failed");
 
@@ -39,9 +42,9 @@ fn solid_roundtrip() {
     assert_eq!(decoded.tiles.len(), 4); // 2x2 tiles of 32x32
     assert_eq!(decoded.ihdr.color_mode, ColorMode::Indexed); // indexed mode
 
-    // All indices should be 0 (ink)
+    // All indices should be 1 (ink) in v0.4+ format
     for tile in &decoded.tiles {
-        assert!(tile.indices().iter().all(|&i| i == 0), "expected all ink pixels");
+        assert!(tile.indices().iter().all(|&i| i == 1), "expected all ink pixels");
     }
 }
 
@@ -53,20 +56,22 @@ fn checkerboard_roundtrip() {
 
     assert_eq!(decoded.tiles.len(), 4);
 
-    // Check first tile: alternating 0 and 1
+    // Check first tile: alternating 0 (paper) and 1 (ink) in v0.4+ format
     let tile0 = &decoded.tiles[0];
     let indices = tile0.indices();
     for (i, &idx) in indices.iter().enumerate() {
         let x = i % 32;
         let y = i / 32;
-        let expected = ((x + y) % 2) as u8;
+        // Even positions should be ink (1), odd should be paper (0)
+        let expected = if (x + y) % 2 == 0 { 1 } else { 0 };
         assert_eq!(idx, expected, "pixel mismatch at ({}, {})", x, y);
     }
 }
 
 #[test]
 fn meta_roundtrip() {
-    let mut image = solid_image(1, 64, 64);
+    // Index 0 is paper (white) in v0.4+ format
+    let mut image = solid_image(0, 64, 64);
     image.meta = Some(serde_json::json!({ "author": "test", "tags": ["decay", "art"] }));
 
     let encoded = encode(&image, NOW_MS).expect("encode failed");
@@ -151,7 +156,7 @@ fn indexed_vs_rgba_produces_different_files() {
     let palette = Palette::default();
     let mut indexed_pixels = Vec::with_capacity(64 * 64 * 4);
     for _ in 0..64 * 64 {
-        let [r, g, b] = palette.0[0]; // all ink
+        let [r, g, b] = palette.0[1]; // all ink (index 1 in v0.4+)
         indexed_pixels.extend_from_slice(&[r, g, b, 255]);
     }
     let mut indexed_image = FmrlImage::new(64, 64, indexed_pixels.clone());

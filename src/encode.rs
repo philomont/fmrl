@@ -3,11 +3,11 @@ use std::io::Write;
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 
-use crate::age::age_step;
+use crate::age::{age_step, bleach_step, consolidation_step_with_age, consolidation_step_with_pixel_ages};
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
-    ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, pack_nibbles, write_chunk,
+    AgeType, ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, write_chunk,
 };
 
 /// Input image to encode
@@ -19,6 +19,12 @@ pub struct FmrlImage {
     /// RGBA row-major pixels, width*height*4 bytes
     pub pixels: Vec<u8>,
     pub decay_policy: u8,
+    pub age_type: AgeType,
+    /// Optional per-tile consolidation levels (for re-saving existing files)
+    pub age_levels: Option<Vec<u8>>,
+    /// Optional per-pixel ages (width*height bytes) for independent pixel aging
+    /// If None, tile-level ages are used
+    pub pixel_ages: Option<Vec<u8>>,
     pub meta: Option<serde_json::Value>,
 }
 
@@ -32,6 +38,9 @@ impl FmrlImage {
             palette: Palette::default(),
             pixels,
             decay_policy: 0,
+            age_type: AgeType::Erosion,
+            age_levels: None,
+            pixel_ages: None,
             meta: None,
         }
     }
@@ -45,6 +54,9 @@ impl FmrlImage {
             palette: Palette::default(), // Still used for paper color reference
             pixels,
             decay_policy: 0,
+            age_type: AgeType::Erosion,
+            age_levels: None,
+            pixel_ages: None,
             meta: None,
         }
     }
@@ -52,34 +64,30 @@ impl FmrlImage {
 
 /// Quantize an RGBA pixel to a palette index using alpha + grayscale mapping.
 ///
-/// Storage format (theme-agnostic):
-/// 0 = ink (black [0,0,0], alpha=255) → renders as theme --ink
-/// 1 = paper (transparent, alpha=0) → renders as theme --paper
-/// 2 = accent (white [255,255,255], alpha=255) → renders as theme --accent
-/// 3 = highlight (gray [128,128,128], alpha=255) → renders as theme --highlight
+/// Storage format (v0.4+, theme-agnostic):
+/// Index 0 = paper (white, alpha=0) → renders as theme --paper
+/// Index 1 = ink (black [0,0,0], alpha=255) → renders as theme --ink
+/// Index 2-15 = grayscale steps → map to theme colors
 ///
-/// Alpha is checked first to distinguish paper (transparent) from accent (white).
+/// Alpha is checked first to distinguish paper (transparent) from colors.
 fn quantize_pixel(r: u8, g: u8, b: u8, a: u8) -> u8 {
-    // Transparent pixels are paper (index 1)
-    // This distinguishes paper (alpha=0) from accent (white, alpha=255)
+    use crate::format::PALETTE_SIZE;
+
+    // Transparent pixels are paper (index 0)
     if a < 128 {
-        return 1;
+        return 0;
     }
 
     // For opaque pixels, use brightness for grayscale mapping
     let brightness = (r as u16 + g as u16 + b as u16) / 3;
 
-    // Direct mapping based on brightness thresholds:
-    // 0-63   → ink (black)
-    // 64-191 → highlight (gray)
-    // 192+   → accent (white)
-    if brightness < 64 {
-        0 // ink - black
-    } else if brightness > 191 {
-        2 // accent - white
-    } else {
-        3 // highlight - gray
-    }
+    // Map brightness (0-255) to color indices 1-15
+    // Index 1 = black (brightness 0-16)
+    // Index 15 = almost-white (brightness 240-255)
+    let color_count = PALETTE_SIZE - 1; // 15 colors (indices 1-15)
+    let step = 256 / color_count as u16; // ~17 per step
+    let color_idx = ((brightness / step).min(color_count as u16 - 1) + 1) as u8;
+    color_idx
 }
 
 /// Compress bytes with zlib (not raw DEFLATE).
@@ -116,24 +124,31 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     out.extend_from_slice(&MAGIC);
 
     // IHDR chunk
-    let ihdr = IhdrChunk::new(image.width, image.height, image.color_mode, image.decay_policy);
+    let ihdr = IhdrChunk::new(image.width, image.height, image.color_mode, image.decay_policy, image.age_type);
     write_chunk(&mut out, CHUNK_IHDR, &ihdr.to_bytes());
 
     // DATA chunk: mode-dependent
-    match image.color_mode {
+    // Get age levels from encoding (for consolidation tracking)
+    let age_levels = match image.color_mode {
         ColorMode::Indexed => encode_indexed(&mut out, image, w, h, tiles_x, tiles_y)?,
-        ColorMode::Rgba => encode_rgba(&mut out, image, w, h, tiles_x, tiles_y)?,
-    }
+        ColorMode::Rgba => {
+            encode_rgba(&mut out, image, w, h, tiles_x, tiles_y)?;
+            vec![0u8; tiles_x * tiles_y] // RGBA doesn't use consolidation
+        }
+    };
 
     // AGE chunk: one entry per tile (row-major)
+    // Use fade_level to store consolidation levels
     let mut age_payload = Vec::with_capacity(tiles_x * tiles_y * AGE_ENTRY_BYTES);
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
+            let tile_idx = ty * tiles_x + tx;
+            let consolidation_level = age_levels.get(tile_idx).copied().unwrap_or(0);
             let entry = AgeEntry {
                 tx: tx as u16,
                 ty: ty as u16,
                 last_view: now_ms,
-                fade_level: 0,
+                fade_level: consolidation_level, // Store consolidation level here
                 noise_seed: [tx as u8, (tx >> 8) as u8, ty as u8, (ty >> 8) as u8],
                 edge_damage: 0,
                 reserved: 0,
@@ -157,7 +172,8 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     Ok(out)
 }
 
-/// Encode indexed mode: palette (12 bytes) + packed nibble tiles
+/// Encode indexed mode: palette (48 bytes) + tiles with full-byte indices
+/// Returns the updated age levels for saving to AGE chunk.
 fn encode_indexed(
     out: &mut Vec<u8>,
     image: &FmrlImage,
@@ -165,7 +181,7 @@ fn encode_indexed(
     h: usize,
     tiles_x: usize,
     tiles_y: usize,
-) -> Result<(), FmrlError> {
+) -> Result<Vec<u8>, FmrlError> {
     // Step 1: quantize all pixels to palette indices
     let mut indices = vec![0u8; w * h];
     for y in 0..h {
@@ -179,23 +195,66 @@ fn encode_indexed(
         }
     }
 
-    // Step 2: apply one aging step (morphological erosion + short-run elimination)
-    // This is the FMRL protocol: each encode->decode cycle ages the image
-    indices = age_step(&indices, w, h);
+    // Step 2: apply one aging step based on age_type
+    let mut age_levels = image.age_levels.clone().unwrap_or_else(|| vec![0u8; tiles_x * tiles_y]);
 
-    // DATA chunk: palette (12 bytes) + tiles
+    // Get or initialize per-pixel ages
+    let mut pixel_ages = image.pixel_ages.clone().unwrap_or_else(|| vec![0u8; w * h]);
+
+    indices = match image.age_type {
+        AgeType::Erosion => {
+            age_step(&indices, w, h)
+        }
+        AgeType::Consolidation => {
+            // Use per-pixel ages if available
+            if image.pixel_ages.is_some() {
+                let (new_indices, new_pixel_ages) = consolidation_step_with_pixel_ages(
+                    &indices, &pixel_ages, w, h
+                );
+                // Compute tile-level ages from per-pixel ages (max age in tile)
+                for ty in 0..tiles_y {
+                    for tx in 0..tiles_x {
+                        let tile_idx = ty * tiles_x + tx;
+                        let tx0 = tx * TILE_SIZE;
+                        let ty0 = ty * TILE_SIZE;
+                        let mut max_age = 0u8;
+                        for y in 0..TILE_SIZE {
+                            for x in 0..TILE_SIZE {
+                                let age = new_pixel_ages[(ty0 + y) * w + (tx0 + x)];
+                                if age > max_age {
+                                    max_age = age;
+                                }
+                            }
+                        }
+                        age_levels[tile_idx] = max_age;
+                    }
+                }
+                pixel_ages = new_pixel_ages;
+                new_indices
+            } else {
+                consolidation_step_with_age(&indices, w, h, &mut age_levels)
+            }
+        }
+        AgeType::Bleach => {
+            // Convolutional bleach: 2x2 blocks with mixed/diagonal patterns become paper
+            bleach_step(&indices, w, h)
+        }
+    };
+
+    // DATA chunk: palette (48 bytes) + tiles
     let mut data_payload: Vec<u8> = Vec::new();
-    // Palette: 4 colors × 3 bytes RGB
+    // Palette: PALETTE_SIZE colors × 3 bytes RGB
     for color in &image.palette.0 {
         data_payload.extend_from_slice(color);
     }
 
-    // Per-tile: [u16 compressed_len LE][u8 flags][compressed nibble data]
+    // Per-tile: [u16 compressed_len LE][u8 flags][compressed full-byte data]
+    // Full bytes (no nibbles) for 16-color support
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
             let tile_indices = extract_tile_indices(&indices, w, tx, ty);
-            let packed = pack_nibbles(&tile_indices);
-            let compressed = zlib_compress(&packed)?;
+            // No nibble packing - use full bytes directly
+            let compressed = zlib_compress(&tile_indices)?;
             let len = compressed.len() as u16;
             data_payload.extend_from_slice(&len.to_le_bytes());
             data_payload.push(0u8); // flags
@@ -203,7 +262,7 @@ fn encode_indexed(
         }
     }
     write_chunk(out, CHUNK_DATA, &data_payload);
-    Ok(())
+    Ok(age_levels)
 }
 
 /// Encode RGBA mode: paper color (3 bytes) + raw RGBA tiles
@@ -217,8 +276,8 @@ fn encode_rgba(
 ) -> Result<(), FmrlError> {
     // DATA chunk: paper color RGB (3 bytes) + tiles
     let mut data_payload: Vec<u8> = Vec::new();
-    // Store paper color for fade target
-    data_payload.extend_from_slice(&image.palette.0[1]);
+    // Store paper color for fade target (index 0 is paper in v0.4+)
+    data_payload.extend_from_slice(&image.palette.0[0]);
 
     // Per-tile: [u16 compressed_len LE][u8 flags][compressed RGBA data]
     for ty in 0..tiles_y {

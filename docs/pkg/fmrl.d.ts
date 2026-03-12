@@ -6,6 +6,15 @@ export class FmrlView {
     free(): void;
     [Symbol.dispose](): void;
     /**
+     * Returns the age levels (consolidation levels from fade_level) for all tiles.
+     * Each entry is the consolidation level for that tile (0=initial, 1=2x2 done, etc.)
+     */
+    age_levels(): Uint8Array;
+    /**
+     * Returns the age type: 0 = erosion, 1 = consolidation, 2 = bleach
+     */
+    age_type(): number;
+    /**
      * Average fade_level across all tiles (0–255).
      */
     avg_fade_level(): number;
@@ -39,13 +48,32 @@ export class FmrlView {
 }
 
 /**
- * Apply one aging step to flat palette indices and return the result.
+ * Apply one convolutional bleach step.
  *
- * `data` must be `width * height` bytes of palette indices (0–3; 1 = paper).
- * Returns a new array of the same length with aged indices.
- * See `age::age_step` for the full algorithm description.
+ * Uses 2×2 convolution to detect and bleach "noisy" blocks:
+ * - If 3+ different indices in 2×2 block → becomes paper
+ * - If 2 indices with unequal counts → becomes paper
+ * - If 2 indices with equal counts (2 each) AND diagonal pattern → becomes paper
+ * See `age::bleach_step` for the full algorithm description.
  */
-export function age_step_indices(data: Uint8Array, width: number, height: number): Uint8Array;
+export function bleach_step_indices(data: Uint8Array, width: number, height: number): Uint8Array;
+
+/**
+ * Apply one consolidation step: reduce resolution by 2× then upscale back.
+ *
+ * `data` must be `width * height` bytes of palette indices.
+ * Each 2×2 block becomes one pixel with the most common index (lowest wins ties).
+ * Result is upscaled back to original dimensions by duplication.
+ * See `age::consolidation_step` for the full algorithm description.
+ */
+export function consolidation_step_indices(data: Uint8Array, width: number, height: number): Uint8Array;
+
+/**
+ * Apply one consolidation step with per-pixel ages.
+ * Returns [indices_out, pixel_ages_out] as a single concatenated array.
+ * indices_out is width*height bytes, pixel_ages_out is width*height bytes.
+ */
+export function consolidation_step_with_ages(indices: Uint8Array, pixel_ages: Uint8Array, width: number, height: number): Uint8Array;
 
 /**
  * Create a fresh demo .fmrl file with a manuscript-like pattern.
@@ -72,26 +100,63 @@ export function decode_to_rgba(data: Uint8Array): Uint8Array;
 /**
  * Encode raw RGBA pixels into a new .fmrl file using indexed mode (palette quantization).
  * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+ * Uses default age_type (erosion).
  */
 export function encode_rgba(rgba: Uint8Array, width: number, height: number): Uint8Array;
 
 /**
  * Encode raw RGBA pixels into a new .fmrl file using full RGBA mode (no palette quantization).
  * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
+ * Uses default age_type (erosion).
  */
 export function encode_rgba_full(rgba: Uint8Array, width: number, height: number): Uint8Array;
+
+/**
+ * Encode raw RGBA pixels in full RGBA mode with specified age type.
+ * `age_type`: 0 = erosion, 1 = fade, 2 = noise
+ */
+export function encode_rgba_full_with_age(rgba: Uint8Array, width: number, height: number, age_type: number): Uint8Array;
+
+/**
+ * Encode raw RGBA pixels with specified age type.
+ * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+ */
+export function encode_rgba_with_age(rgba: Uint8Array, width: number, height: number, age_type: number): Uint8Array;
+
+/**
+ * Encode raw RGBA pixels with age type and existing age levels.
+ * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+ * `age_levels`: per-tile consolidation levels (empty = start fresh)
+ */
+export function encode_rgba_with_age_and_levels(rgba: Uint8Array, width: number, height: number, age_type: number, age_levels: Uint8Array): Uint8Array;
+
+/**
+ * Encode raw RGBA pixels with age type, age levels, and per-pixel ages.
+ * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+ * `age_levels`: per-tile consolidation levels (empty = start fresh)
+ * `pixel_ages`: per-pixel ages (empty = use tile-level ages, must be width*height bytes)
+ */
+export function encode_rgba_with_pixel_ages(rgba: Uint8Array, width: number, height: number, age_type: number, age_levels: Uint8Array, pixel_ages: Uint8Array): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
     readonly __wbg_fmrlview_free: (a: number, b: number) => void;
-    readonly age_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly bleach_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly consolidation_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
+    readonly consolidation_step_with_ages: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly create_demo_fmrl: () => [number, number, number, number];
     readonly decode_to_indices: (a: number, b: number) => [number, number, number, number];
     readonly decode_to_rgba: (a: number, b: number) => [number, number, number, number];
     readonly encode_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly encode_rgba_full: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly encode_rgba_full_with_age: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly encode_rgba_with_age: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly encode_rgba_with_age_and_levels: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+    readonly encode_rgba_with_pixel_ages: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+    readonly fmrlview_age_levels: (a: number) => [number, number];
+    readonly fmrlview_age_type: (a: number) => number;
     readonly fmrlview_avg_fade_level: (a: number) => number;
     readonly fmrlview_color_mode: (a: number) => number;
     readonly fmrlview_decode_and_decay: (a: number) => [number, number, number, number];
