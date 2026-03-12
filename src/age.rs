@@ -164,14 +164,16 @@ pub fn consolidation_step_with_age(
         let ty = tile_idx / tiles_x;
         let level = age_levels[tile_idx];
 
-        // Calculate block size: 2^(level+1), no upper limit
+        // Calculate block size: 2^(level+1), capped to prevent overflow
         // level 0 -> 2x2, level 1 -> 4x4, level 2 -> 8x8, etc.
-        let block_size = 1usize << (level + 1);
+        // Cap at 2^10 = 1024 to avoid overflow and keep performance reasonable
+        let shift_amount = (level + 1).min(10);
+        let block_size = 1usize << shift_amount;
 
         // Calculate deterministic random offset for this tile
         // Use tile coordinates as seed for reproducibility
-        let offset_x = ((tx * 7 + ty * 13) % block_size.max(1)) as isize;
-        let offset_y = ((tx * 11 + ty * 17) % block_size.max(1)) as isize;
+        let offset_x = ((tx * 7 + ty * 13) % block_size) as isize;
+        let offset_y = ((tx * 11 + ty * 17) % block_size) as isize;
 
         // Tile origin with offset
         let base_x = (tx * TILE_SIZE) as isize;
