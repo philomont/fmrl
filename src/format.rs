@@ -224,8 +224,9 @@ impl Default for Palette {
         // Paper (index 0) - white, treated as transparent via alpha
         colors[0] = [255, 255, 255];
         // Color indices 1-15: black to almost-white
+        // Index 1 = black (0), Index 15 = light gray (238)
         for i in 1..PALETTE_SIZE {
-            let gray = ((PALETTE_SIZE - i) * 17).min(255) as u8;
+            let gray = (((i - 1) * 17)).min(255) as u8;
             colors[i] = [gray, gray, gray];
         }
         Palette(colors)

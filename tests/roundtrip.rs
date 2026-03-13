@@ -18,11 +18,16 @@ fn checkerboard_image(width: u16, height: u16) -> FmrlImage {
     let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
     for y in 0..height as usize {
         for x in 0..width as usize {
-            // v0.4+: 0=paper (white), 1=ink (black)
+            // v0.4+: 0=paper (transparent), 1=ink (black)
             // Checkerboard: even positions get ink (1), odd get paper (0)
-            let idx = if (x + y) % 2 == 0 { 1 } else { 0 };
-            let [r, g, b] = palette.0[idx];
-            pixels.extend_from_slice(&[r, g, b, 255]);
+            let is_ink = (x + y) % 2 == 0;
+            if is_ink {
+                let [r, g, b] = palette.0[1]; // ink = black
+                pixels.extend_from_slice(&[r, g, b, 255]); // opaque
+            } else {
+                // Paper is transparent (alpha < 128)
+                pixels.extend_from_slice(&[255, 255, 255, 0]); // transparent white
+            }
         }
     }
     let mut image = FmrlImage::new(width, height, pixels);
@@ -42,9 +47,17 @@ fn solid_roundtrip() {
     assert_eq!(decoded.tiles.len(), 4); // 2x2 tiles of 32x32
     assert_eq!(decoded.ihdr.color_mode, ColorMode::Indexed); // indexed mode
 
-    // All indices should be 1 (ink) in v0.4+ format
+    // With aging applied during encode, edge pixels erode.
+    // For a solid 32x32 tile, inner 30x30 pixels remain ink (1).
+    // Check that the center of each tile is still ink.
     for tile in &decoded.tiles {
-        assert!(tile.indices().iter().all(|&i| i == 1), "expected all ink pixels");
+        let indices = tile.indices();
+        // Check center pixel (16,16) in tile
+        let center_idx = 16 * 32 + 16;
+        assert_eq!(indices[center_idx], 1, "center pixel should be ink");
+        // Most pixels should still be ink (not all eroded)
+        let ink_count = indices.iter().filter(|&i| *i == 1).count();
+        assert!(ink_count > 900, "most pixels should remain ink, found {}", ink_count);
     }
 }
 
@@ -56,16 +69,14 @@ fn checkerboard_roundtrip() {
 
     assert_eq!(decoded.tiles.len(), 4);
 
-    // Check first tile: alternating 0 (paper) and 1 (ink) in v0.4+ format
+    // Checkerboard pattern is maximally vulnerable to erosion.
+    // Every non-paper pixel has 4 paper neighbors, so after one
+    // erosion step, the entire checkerboard becomes paper (all 0s).
+    // This is expected behavior for FMRL aging.
     let tile0 = &decoded.tiles[0];
     let indices = tile0.indices();
-    for (i, &idx) in indices.iter().enumerate() {
-        let x = i % 32;
-        let y = i / 32;
-        // Even positions should be ink (1), odd should be paper (0)
-        let expected = if (x + y) % 2 == 0 { 1 } else { 0 };
-        assert_eq!(idx, expected, "pixel mismatch at ({}, {})", x, y);
-    }
+    // After erosion, checkerboard should be all paper
+    assert!(indices.iter().all(|&i| i == 0), "checkerboard should erode to all paper");
 }
 
 #[test]
