@@ -164,8 +164,9 @@ fn min_age_in_region(
     min_age
 }
 
-/// Check if a region has multiple different non-paper colors.
-/// Returns true if there are 2+ different indices (excluding paper=0).
+/// Check if a region has multiple different colors.
+/// Returns true if there are 2+ different indices (including paper=0).
+/// This ensures regions with ink+paper also age (edge erosion).
 fn has_multiple_colors(
     indices: &[u8],
     width: usize,
@@ -181,16 +182,14 @@ fn has_multiple_colors(
     for by in y..y_end {
         for bx in x..x_end {
             let idx = indices[by * width + bx];
-            if idx != 0 {
-                if first_color.is_none() {
-                    first_color = Some(idx);
-                } else if Some(idx) != first_color {
-                    return true; // Found a different color
-                }
+            if first_color.is_none() {
+                first_color = Some(idx);
+            } else if Some(idx) != first_color {
+                return true; // Found a different color
             }
         }
     }
-    false // All same color (or all paper)
+    false // All same color (or single color + paper, but paper counts!)
 }
 
 /// Check if a region is uniform (all pixels have the same index, or all paper).
