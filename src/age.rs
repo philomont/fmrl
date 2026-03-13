@@ -164,22 +164,62 @@ fn min_age_in_region(
     min_age
 }
 
-/// Apply one consolidation step using edge-first hierarchical aging.
+/// Check if a region has multiple different non-paper colors.
+/// Returns true if there are 2+ different indices (excluding paper=0).
+fn has_multiple_colors(
+    indices: &[u8],
+    width: usize,
+    x: usize,
+    y: usize,
+    block_w: usize,
+    block_h: usize,
+) -> bool {
+    let x_end = (x + block_w).min(width);
+    let y_end = (y + block_h).min(indices.len() / width);
+
+    let mut first_color: Option<u8> = None;
+    for by in y..y_end {
+        for bx in x..x_end {
+            let idx = indices[by * width + bx];
+            if idx != 0 {
+                if first_color.is_none() {
+                    first_color = Some(idx);
+                } else if Some(idx) != first_color {
+                    return true; // Found a different color
+                }
+            }
+        }
+    }
+    false // All same color (or all paper)
+}
+
+/// Check if a region is uniform (all pixels have the same index, or all paper).
+fn is_uniform(
+    indices: &[u8],
+    width: usize,
+    x: usize,
+    y: usize,
+    block_w: usize,
+    block_h: usize,
+) -> bool {
+    !has_multiple_colors(indices, width, x, y, block_w, block_h)
+}
+
+/// Apply one consolidation step using hierarchical per-pixel aging.
 ///
-/// Each pixel has its own age (0-4). The key insight is that edge pixels
-/// (pixels with paper neighbors) age first, creating gradual erosion from
-/// the outside inward before blocks consolidate.
+/// Each pixel has its own age (0-4). On each step, pixels advance ONE level
+/// based on their current age. New drawings (age 0) age properly even when
+/// drawn on top of older content.
 ///
-/// Aging process:
-/// - Age 0 pixels → edge detection → increment age of edge pixels
-/// - When enough edge pixels age, 2×2 blocks consolidate (become age 1)
-/// - Age 1 pixels → edge detection at 4×4 level → increment edge ages
-/// - When enough edge pixels age, 4×4 blocks consolidate (become age 2)
-/// - Continue through 8×8 and 16×16 levels
+/// A block consolidates when ALL pixels have age <= threshold AND at least one
+/// pixel has age == threshold. This allows mixed-age blocks to consolidate
+/// at the level of the newest (youngest) pixels.
+///
+/// - Age 0 pixels → 2×2 blocks consolidate (become age 1)
+/// - Age 1 pixels → 4×4 blocks consolidate (become age 2)
+/// - Age 2 pixels → 8×8 blocks consolidate (become age 3)
+/// - Age 3 pixels → 16×16 blocks consolidate (become age 4)
 /// - Age 4+ → paper
-///
-/// The "edge-first" approach creates gradual thinning of strokes before
-/// they fully consolidate, making the aging feel more natural.
 pub fn consolidation_step_with_pixel_ages(
     indices: &[u8],
     pixel_ages: &[u8],
@@ -187,63 +227,7 @@ pub fn consolidation_step_with_pixel_ages(
     height: usize,
 ) -> (Vec<u8>, Vec<u8>) {
     let result = indices.to_vec();
-    let mut new_ages = pixel_ages.to_vec();
-
-    // Edge-first aging: increment age of edge pixels (pixels with paper neighbors)
-    // This creates gradual erosion from outside inward
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            if indices[idx] == PAPER_INDEX {
-                continue; // Paper doesn't age
-            }
-
-            // Check if this pixel has any paper neighbors (is on the edge)
-            let mut has_paper_neighbor = false;
-            for dy in -1i32..=1 {
-                for dx in -1i32..=1 {
-                    if dx == 0 && dy == 0 {
-                        continue;
-                    }
-                    let nx = x as i32 + dx;
-                    let ny = y as i32 + dy;
-
-                    // Out of bounds counts as paper
-                    if nx < 0 || nx >= width as i32 || ny < 0 || ny >= height as i32 {
-                        has_paper_neighbor = true;
-                        break;
-                    }
-
-                    let nidx = ny as usize * width + nx as usize;
-                    if indices[nidx] == PAPER_INDEX {
-                        has_paper_neighbor = true;
-                        break;
-                    }
-                }
-                if has_paper_neighbor {
-                    break;
-                }
-            }
-
-            // Edge pixels age faster - increment their age
-            // But cap at current consolidation level threshold
-            if has_paper_neighbor {
-                let current_age = new_ages[idx];
-                let max_age = match current_age {
-                    0 => 0,  // Will be set when 2x2 consolidates
-                    _ => current_age,
-                };
-
-                // Edge pixels get "bonus" aging toward next threshold
-                // Age 0 pixels on edge: bump toward age 1 (ready for 2x2)
-                // Age 1 pixels on edge: bump toward age 2 (ready for 4x4)
-                // etc.
-                if current_age < 4 {
-                    new_ages[idx] = current_age + 1;
-                }
-            }
-        }
-    }
+    let new_ages = pixel_ages.to_vec();
 
     // First pass: determine consolidation based on ORIGINAL ages
     // A block consolidates if:
@@ -267,8 +251,10 @@ pub fn consolidation_step_with_pixel_ages(
                 &new_ages, width, x, y, x_end - x, y_end - y
             );
 
-            // Consolidate if any pixel is age 0 (youngest drives consolidation)
-            if min_age == 0 {
+            // Consolidate if:
+            // 1. At least one pixel is age 0 (youngest drives consolidation)
+            // 2. Block has multiple colors (heterogeneous - worth consolidating)
+            if min_age == 0 && has_multiple_colors(indices, width, x, y, x_end - x, y_end - y) {
                 should_consolidate_2x2[(y / 2) * (width / 2) + (x / 2)] = true;
             }
         }
@@ -285,7 +271,7 @@ pub fn consolidation_step_with_pixel_ages(
                 &new_ages, width, x, y, x_end - x, y_end - y
             );
 
-            if min_age == 1 {
+            if min_age == 1 && has_multiple_colors(indices, width, x, y, x_end - x, y_end - y) {
                 should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] = true;
             }
         }
@@ -301,7 +287,7 @@ pub fn consolidation_step_with_pixel_ages(
                 &new_ages, width, x, y, x_end - x, y_end - y
             );
 
-            if min_age == 2 {
+            if min_age == 2 && has_multiple_colors(indices, width, x, y, x_end - x, y_end - y) {
                 should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] = true;
             }
         }
@@ -317,7 +303,7 @@ pub fn consolidation_step_with_pixel_ages(
                 &new_ages, width, x, y, x_end - x, y_end - y
             );
 
-            if min_age == 3 {
+            if min_age == 3 && has_multiple_colors(indices, width, x, y, x_end - x, y_end - y) {
                 should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] = true;
             }
         }
