@@ -270,7 +270,8 @@ pub fn consolidation_step_with_pixel_ages(
                 &new_ages, width, x, y, x_end - x, y_end - y
             );
 
-            if min_age == 1 && has_multiple_colors(indices, width, x, y, x_end - x, y_end - y) {
+            // 4×4: only check age (blocks that consolidated at 2×2 continue aging)
+            if min_age == 1 {
                 should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] = true;
             }
         }
@@ -286,7 +287,8 @@ pub fn consolidation_step_with_pixel_ages(
                 &new_ages, width, x, y, x_end - x, y_end - y
             );
 
-            if min_age == 2 && has_multiple_colors(indices, width, x, y, x_end - x, y_end - y) {
+            // 8×8: only check age
+            if min_age == 2 {
                 should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] = true;
             }
         }
@@ -302,7 +304,8 @@ pub fn consolidation_step_with_pixel_ages(
                 &new_ages, width, x, y, x_end - x, y_end - y
             );
 
-            if min_age == 3 && has_multiple_colors(indices, width, x, y, x_end - x, y_end - y) {
+            // 16×16: only check age (final step before paper)
+            if min_age == 3 {
                 should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] = true;
             }
         }
