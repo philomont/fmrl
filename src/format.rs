@@ -3,7 +3,7 @@ use crate::error::FmrlError;
 // Magic bytes: "FMRL" followed by PNG-style sentinel bytes
 pub const MAGIC: [u8; 8] = [b'F', b'M', b'R', b'L', 0x0D, 0x0A, 0x1A, 0x0A];
 
-pub const TILE_SIZE: usize = 32;
+pub const TILE_SIZE: usize = 128;
 
 pub const CHUNK_IHDR: &[u8; 4] = b"IHDR";
 pub const CHUNK_DATA: &[u8; 4] = b"DATA";

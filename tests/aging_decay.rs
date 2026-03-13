@@ -129,8 +129,8 @@ fn aging_reduces_file_size_over_many_steps() {
 /// A checkerboard (maximally compressed-size-hostile) must also converge.
 #[test]
 fn checkerboard_converges_to_all_paper() {
-    let w = 64usize;
-    let h = 64usize;
+    let w = 128usize;
+    let h = 128usize;
     let palette = Palette::default();
 
     // Checkerboard with ink (1) and paper (0) in v0.4+ format
@@ -154,11 +154,11 @@ fn checkerboard_converges_to_all_paper() {
 /// A single isolated pixel must be erased in exactly one step.
 #[test]
 fn single_pixel_erased_in_one_step() {
-    let w = 32usize;
-    let h = 32usize;
+    let w = 128usize;
+    let h = 128usize;
     let mut indices = all_paper(w, h);
     // Single ink pixel (index 1) in v0.4+ format
-    indices[16 * w + 16] = 1;
+    indices[64 * w + 64] = 1;
 
     let aged = age_step(&indices, w, h);
     assert!(
@@ -170,8 +170,8 @@ fn single_pixel_erased_in_one_step() {
 /// age_step must never introduce new non-paper pixels.
 #[test]
 fn aging_never_introduces_non_paper() {
-    let w = 64usize;
-    let h = 64usize;
+    let w = 128usize;
+    let h = 128usize;
     let mut indices = all_paper(w, h);
     // Sparse ink marks (index 1) in v0.4+ format
     for i in (0..w * h).step_by(7) {

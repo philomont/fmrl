@@ -6,8 +6,8 @@ const VIEW_MS: u64 = NOW_MS + 5 * 24 * 3600 * 1000; // 5 days later
 
 fn simple_image() -> FmrlImage {
     let palette = Palette::default();
-    let pixels = vec![0u8, 0, 0, 255].repeat(64 * 64);
-    let mut image = FmrlImage::new(64, 64, pixels);
+    let pixels = vec![0u8, 0, 0, 255].repeat(128 * 128);
+    let mut image = FmrlImage::new(128, 128, pixels);
     image.palette = palette;
     image
 }
@@ -60,7 +60,7 @@ fn age_crc_valid_after_mutation() {
 
     // Re-decode the mutated bytes — this will verify the CRC
     let decoded2 = decode(&file_bytes).expect("re-decode after mutation failed (CRC invalid)");
-    assert_eq!(decoded2.ihdr.width, 64);
+    assert_eq!(decoded2.ihdr.width, 128);
 
     // Age entries should reflect the mutation
     for entry in &decoded2.age {

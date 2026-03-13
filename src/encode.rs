@@ -110,7 +110,7 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
         return Err(FmrlError::MalformedChunk("image dimensions exceed maximum (65504)"));
     }
     if !w.is_multiple_of(TILE_SIZE) || !h.is_multiple_of(TILE_SIZE) {
-        return Err(FmrlError::MalformedChunk("dimensions must be multiples of 32"));
+        return Err(FmrlError::MalformedChunk("dimensions must be multiples of TILE_SIZE"));
     }
     if image.pixels.len() != w * h * 4 {
         return Err(FmrlError::MalformedChunk("pixel buffer size mismatch"));

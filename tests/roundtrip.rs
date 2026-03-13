@@ -38,36 +38,36 @@ fn checkerboard_image(width: u16, height: u16) -> FmrlImage {
 #[test]
 fn solid_roundtrip() {
     // Index 1 is ink (darkest) in v0.4+ format
-    let image = solid_image(1, 64, 64);
+    let image = solid_image(1, 128, 128);
     let encoded = encode(&image, NOW_MS).expect("encode failed");
     let decoded = decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.ihdr.width, 64);
-    assert_eq!(decoded.ihdr.height, 64);
-    assert_eq!(decoded.tiles.len(), 4); // 2x2 tiles of 32x32
+    assert_eq!(decoded.ihdr.width, 128);
+    assert_eq!(decoded.ihdr.height, 128);
+    assert_eq!(decoded.tiles.len(), 1); // 1x1 tiles of 128x128
     assert_eq!(decoded.ihdr.color_mode, ColorMode::Indexed); // indexed mode
 
     // With aging applied during encode, edge pixels erode.
-    // For a solid 32x32 tile, inner 30x30 pixels remain ink (1).
+    // For a solid 128x128 tile, inner pixels remain ink (1).
     // Check that the center of each tile is still ink.
     for tile in &decoded.tiles {
         let indices = tile.indices();
-        // Check center pixel (16,16) in tile
-        let center_idx = 16 * 32 + 16;
+        // Check center pixel (64,64) in tile
+        let center_idx = 64 * 128 + 64;
         assert_eq!(indices[center_idx], 1, "center pixel should be ink");
         // Most pixels should still be ink (not all eroded)
         let ink_count = indices.iter().filter(|&i| *i == 1).count();
-        assert!(ink_count > 900, "most pixels should remain ink, found {}", ink_count);
+        assert!(ink_count > 10000, "most pixels should remain ink, found {}", ink_count);
     }
 }
 
 #[test]
 fn checkerboard_roundtrip() {
-    let image = checkerboard_image(64, 64);
+    let image = checkerboard_image(128, 128);
     let encoded = encode(&image, NOW_MS).expect("encode failed");
     let decoded = decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.tiles.len(), 4);
+    assert_eq!(decoded.tiles.len(), 1);
 
     // Checkerboard pattern is maximally vulnerable to erosion.
     // Every non-paper pixel has 4 paper neighbors, so after one
@@ -82,7 +82,7 @@ fn checkerboard_roundtrip() {
 #[test]
 fn meta_roundtrip() {
     // Index 0 is paper (white) in v0.4+ format
-    let mut image = solid_image(0, 64, 64);
+    let mut image = solid_image(0, 128, 128);
     image.meta = Some(serde_json::json!({ "author": "test", "tags": ["decay", "art"] }));
 
     let encoded = encode(&image, NOW_MS).expect("encode failed");
@@ -95,11 +95,11 @@ fn meta_roundtrip() {
 
 #[test]
 fn age_entries_initialized() {
-    let image = solid_image(0, 64, 64);
+    let image = solid_image(0, 128, 128);
     let encoded = encode(&image, NOW_MS).expect("encode failed");
     let decoded = decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.age.len(), 4);
+    assert_eq!(decoded.age.len(), 1);
     for entry in &decoded.age {
         assert_eq!(entry.last_view, NOW_MS);
         assert_eq!(entry.fade_level, 0);
@@ -126,26 +126,26 @@ fn rgba_image(width: u16, height: u16) -> FmrlImage {
 
 #[test]
 fn rgba_roundtrip() {
-    let image = rgba_image(64, 64);
+    let image = rgba_image(128, 128);
     let encoded = encode(&image, NOW_MS).expect("encode failed");
     let decoded = decode(&encoded).expect("decode failed");
 
-    assert_eq!(decoded.ihdr.width, 64);
-    assert_eq!(decoded.ihdr.height, 64);
-    assert_eq!(decoded.tiles.len(), 4);
+    assert_eq!(decoded.ihdr.width, 128);
+    assert_eq!(decoded.ihdr.height, 128);
+    assert_eq!(decoded.tiles.len(), 1);
     assert_eq!(decoded.ihdr.color_mode, ColorMode::Rgba); // RGBA mode
 
     // Check that tiles contain RGBA data
     for tile in &decoded.tiles {
         assert!(tile.is_rgba(), "tile should be RGBA mode");
-        assert_eq!(tile.rgba().len(), 32 * 32 * 4);
+        assert_eq!(tile.rgba().len(), 128 * 128 * 4);
     }
 }
 
 #[test]
 fn rgba_preserves_colors() {
-    let width = 64u16;
-    let height = 64u16;
+    let width = 128u16;
+    let height = 128u16;
     let image = rgba_image(width, height);
     let encoded = encode(&image, NOW_MS).expect("encode failed");
     let decoded = decode(&encoded).expect("decode failed");
@@ -165,15 +165,15 @@ fn rgba_preserves_colors() {
 fn indexed_vs_rgba_produces_different_files() {
     // Same visual content but different encoding
     let palette = Palette::default();
-    let mut indexed_pixels = Vec::with_capacity(64 * 64 * 4);
-    for _ in 0..64 * 64 {
+    let mut indexed_pixels = Vec::with_capacity(128 * 128 * 4);
+    for _ in 0..128 * 128 {
         let [r, g, b] = palette.0[1]; // all ink (index 1 in v0.4+)
         indexed_pixels.extend_from_slice(&[r, g, b, 255]);
     }
-    let mut indexed_image = FmrlImage::new(64, 64, indexed_pixels.clone());
+    let mut indexed_image = FmrlImage::new(128, 128, indexed_pixels.clone());
     indexed_image.palette = palette.clone();
 
-    let mut rgba_image = FmrlImage::new_rgba(64, 64, indexed_pixels);
+    let mut rgba_image = FmrlImage::new_rgba(128, 128, indexed_pixels);
     rgba_image.palette = palette;
 
     let indexed_encoded = encode(&indexed_image, NOW_MS).expect("encode failed");

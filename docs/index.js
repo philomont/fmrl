@@ -1,4 +1,4 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, bleach_step_indices, encode_rgba_with_pixel_ages } from './pkg/fmrl.js?v=8';
+import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, bleach_step_indices, encode_rgba_with_pixel_ages } from './pkg/fmrl.js?v=9';
 
 // Age type: 0 = erosion (default), 1 = consolidation
 let currentAgeType = 0;
@@ -15,12 +15,14 @@ let currentPixelAges = null;
 let W = 0;
 let H = 0;
 
+const TILE_SIZE = 128;
+
 function computeCanvasDims(srcW, srcH) {
     const MAX   = 1024;
     const scale = Math.min(1, MAX / Math.max(srcW, srcH));
     return [
-        Math.min(Math.ceil(srcW * scale / 32) * 32, MAX),
-        Math.min(Math.ceil(srcH * scale / 32) * 32, MAX),
+        Math.min(Math.ceil(srcW * scale / TILE_SIZE) * TILE_SIZE, MAX),
+        Math.min(Math.ceil(srcH * scale / TILE_SIZE) * TILE_SIZE, MAX),
     ];
 }
 
@@ -538,19 +540,19 @@ function applyAge(n = 1) {
 
 // Update tile-level age levels from per-pixel ages (max age per tile)
 function updateTileAgeLevelsFromPixelAges() {
-    const tilesX = W / 32;
-    const tilesY = H / 32;
+    const tilesX = W / TILE_SIZE;
+    const tilesY = H / TILE_SIZE;
     currentAgeLevels = new Uint8Array(tilesX * tilesY);
 
     for (let ty = 0; ty < tilesY; ty++) {
         for (let tx = 0; tx < tilesX; tx++) {
             let maxAge = 0;
             const tileBase = ty * tilesX + tx;
-            const y0 = ty * 32;
-            const x0 = tx * 32;
+            const y0 = ty * TILE_SIZE;
+            const x0 = tx * TILE_SIZE;
 
-            for (let y = 0; y < 32; y++) {
-                for (let x = 0; x < 32; x++) {
+            for (let y = 0; y < TILE_SIZE; y++) {
+                for (let x = 0; x < TILE_SIZE; x++) {
                     const pixelAge = currentPixelAges[(y0 + y) * W + (x0 + x)];
                     if (pixelAge > maxAge) {
                         maxAge = pixelAge;
@@ -995,16 +997,16 @@ function loadFmrl(arrayBuffer) {
         // Initialize per-pixel ages from tile ages
         // Each pixel in a tile gets the tile's age
         if (currentAgeType === 1 && currentAgeLevels) {
-            const tilesX = W / 32;
-            const tilesY = H / 32;
+            const tilesX = W / TILE_SIZE;
+            const tilesY = H / TILE_SIZE;
             currentPixelAges = new Uint8Array(W * H);
             for (let ty = 0; ty < tilesY; ty++) {
                 for (let tx = 0; tx < tilesX; tx++) {
                     const tileAge = currentAgeLevels[ty * tilesX + tx] || 0;
-                    const y0 = ty * 32;
-                    const x0 = tx * 32;
-                    for (let y = 0; y < 32; y++) {
-                        for (let x = 0; x < 32; x++) {
+                    const y0 = ty * TILE_SIZE;
+                    const x0 = tx * TILE_SIZE;
+                    for (let y = 0; y < TILE_SIZE; y++) {
+                        for (let x = 0; x < TILE_SIZE; x++) {
                             currentPixelAges[(y0 + y) * W + (x0 + x)] = tileAge;
                         }
                     }
@@ -1303,7 +1305,7 @@ main().catch(err => {
 window.addEventListener('load', () => {
     setTimeout(() => {
         console.log('Canvas dimensions:', W, 'x', H);
-        console.log('Tiles:', (W/32), 'x', (H/32), '=', (W/32)*(H/32));
-        console.log('Estimated overhead:', ((W/32)*(H/32) * 22 + 511), 'bytes');
+        console.log('Tiles:', (W/TILE_SIZE), 'x', (H/TILE_SIZE), '=', (W/TILE_SIZE)*(H/TILE_SIZE));
+        console.log('Estimated overhead:', ((W/TILE_SIZE)*(H/TILE_SIZE) * 22 + 511), 'bytes');
     }, 1000);
 });
