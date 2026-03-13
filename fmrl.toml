@@ -9,10 +9,10 @@
 # =============================================================================
 
 [format]
-# Tile size in pixels (must be power of 2, typically 32)
+# Tile size in pixels (must be power of 2, typically 32 or 128)
 # Smaller tiles = more granular decay but larger file sizes
 # Larger tiles = less granular decay but smaller file sizes
-tile_size = 32
+tile_size = 128
 
 # Maximum image dimensions (in pixels)
 # FMRL uses u16 for dimensions, so max is 65535
@@ -62,7 +62,7 @@ highlight = [243, 198, 35]   # rgb(243, 198, 35)
 
 [themes.vintage]
 name = "Spring Pastels"
-ink = [137, 152, 109]          # rgb(137, 152, 109)
+ink = [42, 51, 30]          # rgb(42, 51, 30) - dark olive for contrast
 paper = [246, 240, 215]     # rgb(246, 240, 215)
 accent = [156, 171, 132]        # rgb(156, 171, 132)
 highlight = [197, 216, 157] # rgb(197, 216, 157)
