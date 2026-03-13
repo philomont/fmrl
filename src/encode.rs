@@ -138,17 +138,17 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
         }
     };
 
-    // AGE chunk: sparse storage - only for tiles with non-paper content
-    // Format: [u16 tile_count] followed by compressed [tx, ty, age] entries
-    // This reduces size significantly for sparse images
+    // AGE chunk: compressed storage for all tiles
+    // Format: [u16 entry_count] followed by compressed entries
+    // For mostly-uniform data, zlib compression provides significant savings
     let mut age_entries: Vec<(u16, u16, u8)> = Vec::new();
+
+    // Store entries for all tiles (compression will optimize uniform data)
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
             let tile_idx = ty * tiles_x + tx;
-            let consolidation_level = age_levels.get(tile_idx).copied().unwrap_or(0);
-            // Only store ages for tiles with content (consolidation_level > 0 or has ink)
-            // For now, store all to maintain compatibility; compression will help
-            age_entries.push((tx as u16, ty as u16, consolidation_level));
+            let tile_age = age_levels.get(tile_idx).copied().unwrap_or(0);
+            age_entries.push((tx as u16, ty as u16, tile_age));
         }
     }
 
@@ -168,7 +168,7 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
         age_data.extend_from_slice(&[0u8, 0]); // reserved
     }
 
-    // Compress age data
+    // Compress age data (empty for blank images = just zlib overhead)
     let compressed_age = zlib_compress(&age_data)?;
     age_payload.extend_from_slice(&compressed_age);
     write_chunk(&mut out, CHUNK_AGE, &age_payload);
