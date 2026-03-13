@@ -1,4 +1,4 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, bleach_step_indices, encode_rgba_with_pixel_ages } from './pkg/fmrl.js';
+import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, bleach_step_indices, encode_rgba_with_pixel_ages } from './pkg/fmrl.js?v=6';
 
 // Age type: 0 = erosion (default), 1 = consolidation
 let currentAgeType = 0;
