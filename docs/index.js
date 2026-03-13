@@ -602,13 +602,12 @@ function formatBytes(bytes) {
 }
 
 function computeBlankSize() {
-    // Create all-paper indices (paper is index 0 in v0.4+)
-    const paperIndices = new Uint8Array(W * H).fill(0);
-    // Use current palette for blank size calculation
-    const palette = getThemePalette();
+    // Use constant PALETTE for consistent blank size across themes
+    // This ensures the base file size is always computed the same way
+    // regardless of which theme is currently selected
     const rgba = new Uint8Array(W * H * 4);
     for (let i = 0; i < W * H; i++) {
-        const [r, g, b] = palette[1]; // paper color
+        const [r, g, b] = PALETTE[0]; // paper color (index 0)
         rgba[i * 4] = r;
         rgba[i * 4 + 1] = g;
         rgba[i * 4 + 2] = b;
