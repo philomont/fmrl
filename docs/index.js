@@ -1,4 +1,4 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, bleach_step_indices, encode_rgba_with_pixel_ages } from './pkg/fmrl.js?v=6';
+import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, bleach_step_indices, encode_rgba_with_pixel_ages } from './pkg/fmrl.js?v=7';
 
 // Age type: 0 = erosion (default), 1 = consolidation
 let currentAgeType = 0;
@@ -1297,4 +1297,13 @@ async function main() {
 main().catch(err => {
     console.error('FMRL init failed:', err);
     document.getElementById('overlay').querySelector('span').textContent = 'Failed to load WASM.';
+});
+
+// Debug: Log actual canvas dimensions
+window.addEventListener('load', () => {
+    setTimeout(() => {
+        console.log('Canvas dimensions:', W, 'x', H);
+        console.log('Tiles:', (W/32), 'x', (H/32), '=', (W/32)*(H/32));
+        console.log('Estimated overhead:', ((W/32)*(H/32) * 22 + 511), 'bytes');
+    }, 1000);
 });

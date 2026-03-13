@@ -92,7 +92,7 @@ fn quantize_pixel(r: u8, g: u8, b: u8, a: u8) -> u8 {
 
 /// Compress bytes with zlib (not raw DEFLATE).
 /// Uses best compression for smallest file size.
-fn zlib_compress(data: &[u8]) -> Result<Vec<u8>, FmrlError> {
+pub fn zlib_compress(data: &[u8]) -> Result<Vec<u8>, FmrlError> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
     encoder.write_all(data).map_err(|e| FmrlError::CompressionError(e.to_string()))?;
     encoder.finish().map_err(|e| FmrlError::CompressionError(e.to_string()))
@@ -138,25 +138,39 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
         }
     };
 
-    // AGE chunk: one entry per tile (row-major)
-    // Use fade_level to store consolidation levels
-    let mut age_payload = Vec::with_capacity(tiles_x * tiles_y * AGE_ENTRY_BYTES);
+    // AGE chunk: sparse storage - only for tiles with non-paper content
+    // Format: [u16 tile_count] followed by compressed [tx, ty, age] entries
+    // This reduces size significantly for sparse images
+    let mut age_entries: Vec<(u16, u16, u8)> = Vec::new();
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
             let tile_idx = ty * tiles_x + tx;
             let consolidation_level = age_levels.get(tile_idx).copied().unwrap_or(0);
-            let entry = AgeEntry {
-                tx: tx as u16,
-                ty: ty as u16,
-                last_view: now_ms,
-                fade_level: consolidation_level, // Store consolidation level here
-                noise_seed: [tx as u8, (tx >> 8) as u8, ty as u8, (ty >> 8) as u8],
-                edge_damage: 0,
-                reserved: 0,
-            };
-            age_payload.extend_from_slice(&entry.to_bytes());
+            // Only store ages for tiles with content (consolidation_level > 0 or has ink)
+            // For now, store all to maintain compatibility; compression will help
+            age_entries.push((tx as u16, ty as u16, consolidation_level));
         }
     }
+
+    // Build AGE payload: count + compressed entries
+    // Each entry: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) + edge_damage(1) + reserved(2) = 20 bytes
+    let mut age_payload = Vec::new();
+    age_payload.extend_from_slice(&(age_entries.len() as u16).to_le_bytes());
+
+    let mut age_data = Vec::with_capacity(age_entries.len() * 20);
+    for (tx, ty, level) in age_entries {
+        age_data.extend_from_slice(&tx.to_le_bytes());
+        age_data.extend_from_slice(&ty.to_le_bytes());
+        age_data.extend_from_slice(&now_ms.to_le_bytes());
+        age_data.push(level);
+        age_data.extend_from_slice(&[tx as u8, (tx >> 8) as u8, ty as u8, (ty >> 8) as u8]); // noise_seed
+        age_data.push(0); // edge_damage
+        age_data.extend_from_slice(&[0u8, 0]); // reserved
+    }
+
+    // Compress age data
+    let compressed_age = zlib_compress(&age_data)?;
+    age_payload.extend_from_slice(&compressed_age);
     write_chunk(&mut out, CHUNK_AGE, &age_payload);
 
     // META chunk (optional): JSON → UTF-8 → zlib

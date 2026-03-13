@@ -93,8 +93,9 @@ fn age_chunk_range_correct() {
     let decoded = decode(&encoded).expect("decode failed");
 
     let range = &decoded.age_chunk_range;
-    let tile_count = 4; // 2x2 tiles
-    assert_eq!(range.end - range.start, tile_count * AGE_ENTRY_BYTES);
+    // With compressed AGE format, size varies based on content
+    // Just verify the range is valid and CRC checks out
+    assert!(range.end > range.start, "AGE chunk must have content");
 
     // Verify the CRC stored right after the range is valid
     let payload = &encoded[range.start..range.end];
