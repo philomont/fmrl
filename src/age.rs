@@ -164,182 +164,152 @@ fn min_age_in_region(
     min_age
 }
 
-/// Apply one consolidation step using hierarchical per-pixel aging.
+/// Gradual 16-step consolidation using hierarchical per-pixel aging.
 ///
-/// Each pixel has its own age (0-4). On each step, pixels advance ONE level
-/// based on their current age. New drawings (age 0) age properly even when
-/// drawn on top of older content.
+/// Each pixel ages through 16 levels (0-15) with gradual fading:
+/// - Ages 0-3: Fade through grayscale at current resolution
+/// - Ages 4-7: 2×2 consolidation + fade through grayscale
+/// - Ages 8-11: 4×4 consolidation + fade through grayscale
+/// - Ages 12-14: 8×8 consolidation + fade through grayscale
+/// - Age 15: 16×16 consolidation → paper
 ///
-/// A block consolidates when ALL pixels have age <= threshold AND at least one
-/// pixel has age == threshold. This allows mixed-age blocks to consolidate
-/// at the level of the newest (youngest) pixels.
-///
-/// - Age 0 pixels → 2×2 blocks consolidate (become age 1)
-/// - Age 1 pixels → 4×4 blocks consolidate (become age 2)
-/// - Age 2 pixels → 8×8 blocks consolidate (become age 3)
-/// - Age 3 pixels → 16×16 blocks consolidate (become age 4)
-/// - Age 4+ → paper
+/// The grayscale fade uses palette indices: 1→4→8→12→0 (paper)
+/// This creates 16 gradual visual steps instead of 5 abrupt jumps.
 pub fn consolidation_step_with_pixel_ages(
     indices: &[u8],
     pixel_ages: &[u8],
     width: usize,
     height: usize,
 ) -> (Vec<u8>, Vec<u8>) {
-    let result = indices.to_vec();
-    let new_ages = pixel_ages.to_vec();
+    let mut result = indices.to_vec();
+    let mut new_ages = pixel_ages.to_vec();
 
-    // First pass: determine consolidation based on ORIGINAL ages
-    // A block consolidates if:
-    // - ALL pixels have age <= required_age (no pixel is too old)
-    // - At least one pixel has age == required_age (some pixel is ready)
+    // Define fade levels within each consolidation stage
+    // Age ranges: 0-3 (full res), 4-7 (2x2), 8-11 (4x4), 12-14 (8x8), 15 (16x16)
+    const FADE_LEVELS: [u8; 4] = [1, 4, 8, 12]; // Palette indices to fade through
+
+    // First pass: fade colors based on age within current consolidation level
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            let age = pixel_ages[idx];
+            let current_idx = indices[idx];
+
+            if current_idx == PAPER_INDEX {
+                continue; // Paper stays paper
+            }
+
+            // Determine consolidation level and fade sub-step
+            let (consolidation_level, fade_step) = if age < 4 {
+                (0, age as usize) // Full resolution, fade step 0-3
+            } else if age < 8 {
+                (1, (age - 4) as usize) // 2x2 consolidated, fade step 0-3
+            } else if age < 12 {
+                (2, (age - 8) as usize) // 4x4 consolidated, fade step 0-3
+            } else if age < 15 {
+                (3, (age - 12) as usize) // 8x8 consolidated, fade step 0-3
+            } else {
+                (4, 0) // 16x16 → paper
+            };
+
+            // Apply fade: reduce color index toward paper
+            // Map any non-paper index to fade through FADE_LEVELS
+            if current_idx > 0 && fade_step < 4 {
+                let target_idx = FADE_LEVELS[fade_step];
+                if current_idx > target_idx {
+                    // Fade toward lighter grayscale
+                    result[idx] = target_idx;
+                }
+            }
+
+            // Track the consolidation level in new_ages
+            new_ages[idx] = age;
+        }
+    }
+
+    // Second pass: apply consolidation based on age thresholds
+    // - Age 4+: apply 2×2 consolidation
+    // - Age 8+: apply 4×4 consolidation
+    // - Age 12+: apply 8×8 consolidation
+    // - Age 15: apply 16×16 consolidation → paper
 
     let mut should_consolidate_2x2 = vec![false; (width / 2) * (height / 2)];
     let mut should_consolidate_4x4 = vec![false; (width / 4) * (height / 4)];
     let mut should_consolidate_8x8 = vec![false; (width / 8) * (height / 8)];
     let mut should_consolidate_16x16 = vec![false; (width / 16) * (height / 16)];
 
-    // Check 2×2 blocks: consolidate if min_age == 0
-    // (at least one pixel is age 0 and ready for consolidation)
-    // Pixels with higher ages in the block get reset to participate
+    // Check 2×2 blocks: consolidate pixels with age >= 4
     for y in (0..height).step_by(2) {
         for x in (0..width).step_by(2) {
             let y_end = (y + 2).min(height);
             let x_end = (x + 2).min(width);
 
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
+            let min_pixel_age = min_age_in_region(
+                &pixel_ages, width, x, y, x_end - x, y_end - y
             );
 
-            // Consolidate if any pixel is age 0 (youngest drives consolidation)
-            if min_age == 0 {
+            // Consolidate if at least one pixel is age >= 4
+            if min_pixel_age >= 4 {
                 should_consolidate_2x2[(y / 2) * (width / 2) + (x / 2)] = true;
             }
         }
     }
 
-    // Check 4×4 blocks: consolidate if min_age == 1
-    // (at least one pixel is age 1 and ready)
+    // Check 4×4 blocks: consolidate pixels with age >= 8
     for y in (0..height).step_by(4) {
         for x in (0..width).step_by(4) {
             let y_end = (y + 4).min(height);
             let x_end = (x + 4).min(width);
 
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
+            let min_pixel_age = min_age_in_region(
+                &pixel_ages, width, x, y, x_end - x, y_end - y
             );
 
-            if min_age == 1 {
+            if min_pixel_age >= 8 {
                 should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] = true;
             }
         }
     }
 
-    // Check 8×8 blocks: consolidate if min_age == 2
+    // Check 8×8 blocks: consolidate pixels with age >= 12
     for y in (0..height).step_by(8) {
         for x in (0..width).step_by(8) {
             let y_end = (y + 8).min(height);
             let x_end = (x + 8).min(width);
 
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
+            let min_pixel_age = min_age_in_region(
+                &pixel_ages, width, x, y, x_end - x, y_end - y
             );
 
-            if min_age == 2 {
+            if min_pixel_age >= 12 {
                 should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] = true;
             }
         }
     }
 
-    // Check 16×16 blocks: consolidate if min_age == 3
+    // Check 16×16 blocks: consolidate pixels with age >= 15
     for y in (0..height).step_by(16) {
         for x in (0..width).step_by(16) {
             let y_end = (y + 16).min(height);
             let x_end = (x + 16).min(width);
 
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
+            let min_pixel_age = min_age_in_region(
+                &pixel_ages, width, x, y, x_end - x, y_end - y
             );
 
-            if min_age == 3 {
+            if min_pixel_age >= 15 {
                 should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] = true;
             }
         }
     }
 
-    // Second pass: apply consolidation in order from largest to smallest
+    // Apply consolidation in order from smallest to largest
+    // This preserves the hierarchical nature while allowing gradual fading
+
+    // Create mutable copies for consolidation
     let mut final_result = result.clone();
-    let mut final_ages = new_ages.clone();
 
-    // Apply 16×16 consolidation (age 3 → 4)
-    for y in (0..height).step_by(16) {
-        for x in (0..width).step_by(16) {
-            if should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] {
-                let y_end = (y + 16).min(height);
-                let x_end = (x + 16).min(width);
-
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
-
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        final_result[idx] = min_idx;
-                        final_ages[idx] = 4;
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply 8×8 consolidation (age 2 → 3)
-    for y in (0..height).step_by(8) {
-        for x in (0..width).step_by(8) {
-            if should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] {
-                let y_end = (y + 8).min(height);
-                let x_end = (x + 8).min(width);
-
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
-
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        final_result[idx] = min_idx;
-                        final_ages[idx] = 3;
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply 4×4 consolidation (age 1 → 2)
-    for y in (0..height).step_by(4) {
-        for x in (0..width).step_by(4) {
-            if should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] {
-                let y_end = (y + 4).min(height);
-                let x_end = (x + 4).min(width);
-
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
-
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        final_result[idx] = min_idx;
-                        final_ages[idx] = 2;
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply 2×2 consolidation (age 0 → 1)
+    // Apply 2×2 consolidation (age >= 4)
     for y in (0..height).step_by(2) {
         for x in (0..width).step_by(2) {
             if should_consolidate_2x2[(y / 2) * (width / 2) + (x / 2)] {
@@ -355,25 +325,96 @@ pub fn consolidation_step_with_pixel_ages(
                     for bx in x..x_end {
                         let idx = by * width + bx;
                         final_result[idx] = min_idx;
-                        final_ages[idx] = 1;
+                        // Keep the age for continued fading
+                        if new_ages[idx] < 4 {
+                            new_ages[idx] = 4; // Bump to 2x2 consolidation level
+                        }
                     }
                 }
             }
         }
     }
 
-    // Final pass: pixels with age 4 become paper
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            if final_ages[idx] >= 4 {
-                final_result[idx] = PAPER_INDEX;
-                final_ages[idx] = 0;
+    // Apply 4×4 consolidation (age >= 8)
+    for y in (0..height).step_by(4) {
+        for x in (0..width).step_by(4) {
+            if should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] {
+                let y_end = (y + 4).min(height);
+                let x_end = (x + 4).min(width);
+
+                let min_idx = min_index_in_region(
+                    &result, width, x, y,
+                    x_end - x, y_end - y
+                );
+
+                for by in y..y_end {
+                    for bx in x..x_end {
+                        let idx = by * width + bx;
+                        final_result[idx] = min_idx;
+                        if new_ages[idx] < 8 {
+                            new_ages[idx] = 8; // Bump to 4x4 level
+                        }
+                    }
+                }
             }
         }
     }
 
-    (final_result, final_ages)
+    // Apply 8×8 consolidation (age >= 12)
+    for y in (0..height).step_by(8) {
+        for x in (0..width).step_by(8) {
+            if should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] {
+                let y_end = (y + 8).min(height);
+                let x_end = (x + 8).min(width);
+
+                let min_idx = min_index_in_region(
+                    &result, width, x, y,
+                    x_end - x, y_end - y
+                );
+
+                for by in y..y_end {
+                    for bx in x..x_end {
+                        let idx = by * width + bx;
+                        final_result[idx] = min_idx;
+                        if new_ages[idx] < 12 {
+                            new_ages[idx] = 12; // Bump to 8x8 level
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply 16×16 consolidation (age >= 15) → becomes paper
+    for y in (0..height).step_by(16) {
+        for x in (0..width).step_by(16) {
+            if should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] {
+                let y_end = (y + 16).min(height);
+                let x_end = (x + 16).min(width);
+
+                for by in y..y_end {
+                    for bx in x..x_end {
+                        let idx = by * width + bx;
+                        final_result[idx] = PAPER_INDEX;
+                        new_ages[idx] = 0; // Reset age for paper
+                    }
+                }
+            }
+        }
+    }
+
+    (final_result, new_ages)
+}
+
+/// Legacy function kept for backward compatibility.
+/// Maps the old 5-step consolidation to the new 16-step system.
+pub fn consolidation_step_with_pixel_ages_legacy(
+    indices: &[u8],
+    pixel_ages: &[u8],
+    width: usize,
+    height: usize,
+) -> (Vec<u8>, Vec<u8>) {
+    consolidation_step_with_pixel_ages(indices, pixel_ages, width, height)
 }
 
 /// Find the maximum age in a region.
