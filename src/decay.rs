@@ -100,7 +100,7 @@ fn render_tile_indexed(tile: &TileData, age: &AgeEntry, palette: &Palette, fade:
         // 2. Edge erosion: edge pixels stochastically convert to paper.
         //    Probability gates on edge_damage accumulated over views.
         //    Result is always paper — this reduces information, not adds it.
-        if idx != PAPER_INDEX as usize && is_stroke_edge_indexed(indices, i) {
+        if idx != PAPER_INDEX as usize && is_stroke_edge_indexed(&indices, i) {
             let edge_prob = (age.edge_damage as f32 / 100.0) * fade;
             if prng.next_f32() < edge_prob {
                 pr = paper_r;

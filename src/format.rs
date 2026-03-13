@@ -3,7 +3,7 @@ use crate::error::FmrlError;
 // Magic bytes: "FMRL" followed by PNG-style sentinel bytes
 pub const MAGIC: [u8; 8] = [b'F', b'M', b'R', b'L', 0x0D, 0x0A, 0x1A, 0x0A];
 
-pub const TILE_SIZE: usize = 32;
+pub const TILE_SIZE: usize = 128;
 
 pub const CHUNK_IHDR: &[u8; 4] = b"IHDR";
 pub const CHUNK_DATA: &[u8; 4] = b"DATA";
@@ -224,8 +224,9 @@ impl Default for Palette {
         // Paper (index 0) - white, treated as transparent via alpha
         colors[0] = [255, 255, 255];
         // Color indices 1-15: black to almost-white
+        // Index 1 = black (0), Index 15 = light gray (238)
         for i in 1..PALETTE_SIZE {
-            let gray = ((PALETTE_SIZE - i) * 17).min(255) as u8;
+            let gray = (((i - 1) * 17)).min(255) as u8;
             colors[i] = [gray, gray, gray];
         }
         Palette(colors)

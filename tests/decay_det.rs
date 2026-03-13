@@ -7,15 +7,15 @@ const LATER_MS: u64 = NOW_MS + 15 * 24 * 3600 * 1000;
 fn test_image() -> FmrlImage {
     let palette = Palette::default();
     // Mix of ink and paper pixels for interesting decay behavior
-    let mut pixels = Vec::with_capacity(64 * 64 * 4);
-    for y in 0..64usize {
-        for x in 0..64usize {
+    let mut pixels = Vec::with_capacity(128 * 128 * 4);
+    for y in 0..128usize {
+        for x in 0..128usize {
             let idx = ((x / 8 + y / 8) % 4) as usize;
             let [r, g, b] = palette.0[idx];
             pixels.extend_from_slice(&[r, g, b, 255]);
         }
     }
-    let mut image = FmrlImage::new(64, 64, pixels);
+    let mut image = FmrlImage::new(128, 128, pixels);
     image.palette = palette;
     image
 }
@@ -66,5 +66,5 @@ fn no_decay_at_creation_time() {
 
     // All pixels should be exact palette colors (no desaturation applied)
     // Just verify it doesn't panic and returns correct size
-    assert_eq!(rgba.len(), 64 * 64 * 4);
+    assert_eq!(rgba.len(), 128 * 128 * 4);
 }

@@ -91,8 +91,9 @@ fn quantize_pixel(r: u8, g: u8, b: u8, a: u8) -> u8 {
 }
 
 /// Compress bytes with zlib (not raw DEFLATE).
-fn zlib_compress(data: &[u8]) -> Result<Vec<u8>, FmrlError> {
-    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+/// Uses best compression for smallest file size.
+pub fn zlib_compress(data: &[u8]) -> Result<Vec<u8>, FmrlError> {
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
     encoder.write_all(data).map_err(|e| FmrlError::CompressionError(e.to_string()))?;
     encoder.finish().map_err(|e| FmrlError::CompressionError(e.to_string()))
 }
@@ -109,7 +110,7 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
         return Err(FmrlError::MalformedChunk("image dimensions exceed maximum (65504)"));
     }
     if !w.is_multiple_of(TILE_SIZE) || !h.is_multiple_of(TILE_SIZE) {
-        return Err(FmrlError::MalformedChunk("dimensions must be multiples of 32"));
+        return Err(FmrlError::MalformedChunk("dimensions must be multiples of TILE_SIZE"));
     }
     if image.pixels.len() != w * h * 4 {
         return Err(FmrlError::MalformedChunk("pixel buffer size mismatch"));
@@ -137,25 +138,39 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
         }
     };
 
-    // AGE chunk: one entry per tile (row-major)
-    // Use fade_level to store consolidation levels
-    let mut age_payload = Vec::with_capacity(tiles_x * tiles_y * AGE_ENTRY_BYTES);
+    // AGE chunk: compressed storage for all tiles
+    // Format: [u16 entry_count] followed by compressed entries
+    // For mostly-uniform data, zlib compression provides significant savings
+    let mut age_entries: Vec<(u16, u16, u8)> = Vec::new();
+
+    // Store entries for all tiles (compression will optimize uniform data)
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
             let tile_idx = ty * tiles_x + tx;
-            let consolidation_level = age_levels.get(tile_idx).copied().unwrap_or(0);
-            let entry = AgeEntry {
-                tx: tx as u16,
-                ty: ty as u16,
-                last_view: now_ms,
-                fade_level: consolidation_level, // Store consolidation level here
-                noise_seed: [tx as u8, (tx >> 8) as u8, ty as u8, (ty >> 8) as u8],
-                edge_damage: 0,
-                reserved: 0,
-            };
-            age_payload.extend_from_slice(&entry.to_bytes());
+            let tile_age = age_levels.get(tile_idx).copied().unwrap_or(0);
+            age_entries.push((tx as u16, ty as u16, tile_age));
         }
     }
+
+    // Build AGE payload: count + compressed entries
+    // Each entry: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) + edge_damage(1) + reserved(2) = 20 bytes
+    let mut age_payload = Vec::new();
+    age_payload.extend_from_slice(&(age_entries.len() as u16).to_le_bytes());
+
+    let mut age_data = Vec::with_capacity(age_entries.len() * 20);
+    for (tx, ty, level) in age_entries {
+        age_data.extend_from_slice(&tx.to_le_bytes());
+        age_data.extend_from_slice(&ty.to_le_bytes());
+        age_data.extend_from_slice(&now_ms.to_le_bytes());
+        age_data.push(level);
+        age_data.extend_from_slice(&[tx as u8, (tx >> 8) as u8, ty as u8, (ty >> 8) as u8]); // noise_seed
+        age_data.push(0); // edge_damage
+        age_data.extend_from_slice(&[0u8, 0]); // reserved
+    }
+
+    // Compress age data (empty for blank images = just zlib overhead)
+    let compressed_age = zlib_compress(&age_data)?;
+    age_payload.extend_from_slice(&compressed_age);
     write_chunk(&mut out, CHUNK_AGE, &age_payload);
 
     // META chunk (optional): JSON → UTF-8 → zlib
@@ -248,13 +263,16 @@ fn encode_indexed(
         data_payload.extend_from_slice(color);
     }
 
-    // Per-tile: [u16 compressed_len LE][u8 flags][compressed full-byte data]
-    // Full bytes (no nibbles) for 16-color support
+    // Per-tile: [u16 compressed_len LE][u8 flags][compressed packed data]
+    // Packed format: high nibble = index (0-15), low nibble = age (0-15)
+    // 1 byte per pixel instead of 2
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
             let tile_indices = extract_tile_indices(&indices, w, tx, ty);
-            // No nibble packing - use full bytes directly
-            let compressed = zlib_compress(&tile_indices)?;
+            let tile_ages = extract_tile_ages(&pixel_ages, w, tx, ty);
+            // Pack index + age into one byte per pixel
+            let packed = pack_tile_data(&tile_indices, &tile_ages);
+            let compressed = zlib_compress(&packed)?;
             let len = compressed.len() as u16;
             data_payload.extend_from_slice(&len.to_le_bytes());
             data_payload.push(0u8); // flags
@@ -314,4 +332,24 @@ fn extract_tile_indices(indices: &[u8], width: usize, tx: usize, ty: usize) -> V
         tile.extend_from_slice(&indices[row_start..row_start + TILE_SIZE]);
     }
     tile
+}
+
+fn extract_tile_ages(ages: &[u8], width: usize, tx: usize, ty: usize) -> Vec<u8> {
+    let mut tile = Vec::with_capacity(TILE_SIZE * TILE_SIZE);
+    let x_start = tx * TILE_SIZE;
+    let y_start = ty * TILE_SIZE;
+    for y in y_start..y_start + TILE_SIZE {
+        let row_start = y * width + x_start;
+        tile.extend_from_slice(&ages[row_start..row_start + TILE_SIZE]);
+    }
+    tile
+}
+
+/// Pack tile indices and ages into one byte per pixel.
+/// High nibble (4 bits) = index (0-15), low nibble (4 bits) = age (0-15).
+fn pack_tile_data(indices: &[u8], ages: &[u8]) -> Vec<u8> {
+    assert_eq!(indices.len(), ages.len());
+    indices.iter().zip(ages.iter())
+        .map(|(&idx, &age)| (idx << 4) | (age & 0x0F))
+        .collect()
 }

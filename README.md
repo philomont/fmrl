@@ -170,8 +170,8 @@ enable_usage_decay = true
 
 ```toml
 [encoding]
-# Zlib compression level (0-9)
-compression_level = 6
+# Zlib compression level (0-9) — codec uses best (9) for smallest files
+compression_level = 9
 
 # Store original strokes for reconstruction
 store_original = false
@@ -194,37 +194,39 @@ FMRL uses a PNG-like chunked binary format:
 
 ### Color Modes
 
-**Indexed Mode (Classic)**:
-- 4-color palette (ink, paper, accent, highlight)
-- 4-bit packed storage (2 pixels per byte)
-- Smaller file sizes
+**Indexed Mode (16-color)**:
+- 16-color grayscale palette (index 0 = paper, 1-15 = aging colors)
+- Full-byte storage per pixel (no packing)
+- Theme-agnostic: brightness maps to palette indices
+- Smaller file sizes than RGBA
 
 **RGBA Mode (Full Color)**:
 - Full 8-bit RGB + 8-bit alpha per pixel
-- Default: fully transparent (alpha = 0)
-- Only paper background visible initially
-- Pixels fade toward paper color as they decay
+- Preserves exact colors (no quantization)
+- Larger files but full fidelity
 
 ## Architecture
 
+### Encoding Pipeline (Aging Applied Here)
+
 ```
 Raw Pixels (RGBA)
-  → Color quantization (if indexed) or alpha handling (if RGBA)
+  → Color quantization (if indexed) or pass-through (if RGBA)
+  → Apply aging step (based on age_type)
+     • Erosion: morphological erosion + short-run elimination
+     • Consolidation: progressive block merging
+     • Bleach: convolutional pattern detection
   → 32×32 tile partitioning
-  → RLE + zlib/DEFLATE per tile
+  → zlib/DEFLATE per tile (best compression)
   → .fmrl binary (chunked)
 ```
 
-### Decay/Decode Pipeline
+### Decode Pipeline (Display Only)
 
 ```
 .fmrl file
   → Decompress tiles
-  → Compute decay factor: min(1.0, age_days / base_decay_days)
-  → Apply degradation:
-     • Color fading toward paper
-     • Edge erosion (stochastic)
-     • Optional noise injection
+  → Map palette indices to theme colors (indexed mode)
   → RGBA pixel output
 ```
 
@@ -278,10 +280,13 @@ const rawRgba = decode_to_rgba(fmrlBytes);
 
 ## Decay Model
 
-- **Temporal decay**: Based on age since creation (stored as epoch ms in AGE chunk)
-- **Usage-based decay**: Per-tile `last_view` timestamps track access patterns
-- **Deterministic degradation**: PRNG seeds stored per tile ensure reproducible renders
-- **Persistent state**: `last_view` is updated in the file on each access
+Aging occurs at **encode time** (during save), not during viewing. Three algorithms available:
+
+- **Erosion** (`age_type=0`): Morphological erosion + short-run elimination
+- **Consolidation** (`age_type=1`): Progressive block merging (2×2 → 4×4 → 8×8 → 16×16 → paper)
+- **Bleach** (`age_type=2`): Convolutional cleaning of noisy 2×2 patterns
+
+Each save applies one aging step based on the file's configured `age_type`. The AGE chunk tracks per-tile consolidation levels and timestamps.
 
 ## Testing
 

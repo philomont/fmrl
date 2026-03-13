@@ -1,3 +1,5 @@
+use crate::format::TILE_SIZE;
+
 /// Number of consecutive non-paper pixels in a row or column that will be
 /// erased.  Runs of this length or shorter become paper.
 const RUN_THRESHOLD: usize = 2;
@@ -407,7 +409,6 @@ pub fn consolidation_step_with_age(
     height: usize,
     age_levels: &mut [u8],
 ) -> Vec<u8> {
-    const TILE_SIZE: usize = 32;
     let tiles_x = width / TILE_SIZE;
     let tiles_y = height / TILE_SIZE;
 

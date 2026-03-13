@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-12
+
+### Added
+
+- **Consolidation aging algorithm** — Progressive block merging with per-pixel age tracking
+  - 2×2 blocks consolidate first (age 0 → 1), then 4×4 (age 1 → 2), 8×8 (age 2 → 3), 16×16 (age 3 → 4)
+  - New drawings age alongside existing content via mixed-age block handling
+  - Per-pixel ages allow independent aging of overlapping strokes
+- **Bleach aging algorithm** — Convolutional pattern cleaning using sliding 2×2 windows
+  - Bleaches blocks with 3+ different indices (information-rich/noisy)
+  - Bleaches imbalanced 3:1 patterns
+  - Bleaches anti-diagonal [[a,b],[b,a]] arrangements
+- **Age type selector** — Web UI dropdown to choose between Erosion (0), Consolidation (1), and Bleach (2)
+- `encode_rgba_with_pixel_ages()` WASM export — encode with per-pixel age tracking for consolidation mode
+
+### Changed
+
+- **Maximum zlib compression** — Changed from `Compression::default()` (level 6) to `Compression::best()` (level 9) for ~5-10% smaller file sizes
+- Updated documentation (README, ALGORITHM.md, web app About panel) to describe all three aging techniques
+- Version bump to 0.5.0
+
+## [0.4.0] - 2026-03-11
+
+### Added
+
+- Theme-independent 16-color grayscale storage palette
+- Consolidation aging with per-pixel tracking (initial implementation)
+- Bleach convolution algorithm (initial implementation)
+
+### Changed
+
+- Storage format uses full bytes per pixel (no nibble packing)
+- AGE chunk now tracks `fade_level` as consolidation level per tile
+
 ## [0.3.0] - 2026-03-10
 
 ### Added

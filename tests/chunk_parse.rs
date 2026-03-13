@@ -6,8 +6,8 @@ const NOW_MS: u64 = 1_700_000_000_000;
 
 fn simple_image() -> FmrlImage {
     let palette = Palette::default();
-    let pixels = vec![0u8; 64 * 64 * 4];
-    let mut image = FmrlImage::new(64, 64, pixels);
+    let pixels = vec![0u8; 128 * 128 * 4];
+    let mut image = FmrlImage::new(128, 128, pixels);
     image.palette = palette;
     image
 }
@@ -47,7 +47,7 @@ fn unknown_chunk_skipped() {
 
     // Should parse successfully, ignoring XUNK
     let decoded = decode(&modified).expect("should tolerate unknown chunks");
-    assert_eq!(decoded.ihdr.width, 64);
+    assert_eq!(decoded.ihdr.width, 128);
 }
 
 #[test]

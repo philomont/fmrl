@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>FMRL Size Test</title>
+</head>
+<body>
+  <h1>FMRL Size Diagnostic</h1>
+  <pre id="output"></pre>
+  <script type="module">
+    import init, { encode_rgba, encode_rgba_with_age_and_levels } from './pkg/fmrl.js?v=packed';
+    
+    await init();
+    
+    const output = document.getElementById('output');
+    const log = (msg) => output.textContent += msg + '\n';
+    
+    // Test 1: All paper (should compress very well)
+    log('=== Test 1: All Paper (128x128) ===');
+    let W = 128, H = 128;
+    let rgba = new Uint8Array(W * H * 4);
+    // Transparent white (paper)
+    for (let i = 0; i < rgba.length; i += 4) {
+      rgba[i] = 255; rgba[i+1] = 255; rgba[i+2] = 255; rgba[i+3] = 0;
+    }
+    let bytes = encode_rgba(rgba, W, H);
+    log(`FMRL size: ${bytes.length} bytes`);
+    log(`Raw RGBA: ${rgba.length} bytes`);
+    log(`Overhead: ${bytes.length - 100} bytes (estimated)`);
+    log('');
+    
+    // Test 2: Solid ink border
+    log('=== Test 2: Border Pattern (128x128) ===');
+    rgba = new Uint8Array(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        if (x < 10 || y < 10 || x >= W-10 || y >= H-10) {
+          rgba[i] = 0; rgba[i+1] = 0; rgba[i+2] = 0; rgba[i+3] = 255; // Black ink
+        } else {
+          rgba[i] = 255; rgba[i+1] = 255; rgba[i+2] = 255; rgba[i+3] = 0; // Transparent paper
+        }
+      }
+    }
+    bytes = encode_rgba(rgba, W, H);
+    log(`FMRL size: ${bytes.length} bytes`);
+    
+    // Test with different age types
+    for (let ageType of [0, 1, 2]) {
+      const ageLevels = new Uint8Array(0);
+      bytes = encode_rgba_with_age_and_levels(rgba, W, H, ageType, ageLevels);
+      const ageName = ['Erosion', 'Consolidation', 'Bleach'][ageType];
+      log(`${ageName}: ${bytes.length} bytes`);
+    }
+    log('');
+    
+    // Test 3: Checkerboard
+    log('=== Test 3: Checkerboard (64x64) ===');
+    W = 64; H = 64;
+    rgba = new Uint8Array(W * H * 4);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 4;
+        if ((x + y) % 2 === 0) {
+          rgba[i] = 0; rgba[i+1] = 0; rgba[i+2] = 0; rgba[i+3] = 255; // Black
+        } else {
+          rgba[i] = 255; rgba[i+1] = 255; rgba[i+2] = 255; rgba[i+3] = 0; // Transparent
+        }
+      }
+    }
+    bytes = encode_rgba(rgba, W, H);
+    log(`FMRL size: ${bytes.length} bytes`);
+    log(`Raw RGBA: ${rgba.length} bytes`);
+    log('');
+    
+    log('=== Summary ===');
+    log('If FMRL sizes are larger than expected, check:');
+    log('1. AGE chunk: 22 bytes per tile');
+    log('2. Palette: 48 bytes');
+    log('3. Per-tile headers: 3 bytes each');
+    log('4. Chunk overhead: 12 bytes per chunk minimum');
+  </script>
+</body>
+</html>

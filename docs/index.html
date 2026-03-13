@@ -102,30 +102,38 @@
         <p>
           <strong>.fmrl</strong> (Fragile Manuscript Record Layer) is an image codec
           where visual degradation is a core design feature. Files age with every
-          viewing — simulating the natural deterioration of physical media.
+          save — simulating the natural deterioration of physical media.
         </p>
         <ul>
-          <li><strong>Temporal decay</strong> — pixels fade toward the paper background based on days since last view</li>
-          <li><strong>Edge erosion</strong> — stroke edges wear away with each opening, reducing information rather than adding noise</li>
+          <li><strong>Three aging algorithms</strong> — erosion, consolidation, and bleach each degrade images differently</li>
+          <li><strong>Information-reducing</strong> — each aging step genuinely loses data, making files smaller</li>
           <li><strong>Deterministic</strong> — same file state always renders identically across all platforms</li>
-          <li><strong>Self-contained</strong> — all decay state lives inside the file's <code>AGE</code> chunk</li>
+          <li><strong>Self-contained</strong> — all aging state lives inside the file's <code>AGE</code> chunk</li>
         </ul>
 
-        <h2>How aging works</h2>
+        <h2>Aging Techniques</h2>
         <p>
-          The Age button applies <strong>morphological erosion</strong>: any non-paper
-          pixel with three or more paper 8-neighbors becomes paper, eroding one layer
-          from every exposed surface per press. The eroded file compresses smaller
-          because larger uniform regions are more compressible — information is
-          genuinely lost, not obscured.
+          <strong>Erosion</strong> — morphological erosion: any non-paper pixel with
+          four or more paper 8-neighbors becomes paper. Short runs (≤2 pixels) are
+          also eliminated. This erodes one layer from every exposed surface per step.
         </p>
         <p>
-          <strong>Auto aging</strong> uses a lighter erosion step (no short-run
-          elimination) so high-rate aging feels fluid rather than abrupt. The
-          <code>.fmrl</code> format stores images as a 4-color indexed palette
-          (ink, paper, accent, highlight) in 32×32 tiles, each zlib-compressed. The
-          <code>AGE</code> chunk carries per-tile timestamps and erosion counters
-          rewritten with every render.
+          <strong>Consolidation</strong> — progressive block merging: 2×2 blocks consolidate
+          to one pixel, then 4×4, 8×8, and finally 16×16 before becoming paper.
+          Drawings made over older content age naturally alongside existing strokes.
+        </p>
+        <p>
+          <strong>Bleach</strong> — convolutional cleaning: sliding 2×2 windows detect
+          noisy patterns (3+ different indices, imbalanced 3:1 splits, or anti-diagonal
+          arrangements) and become paper. Removes speckles while preserving solid strokes.
+        </p>
+
+        <h2>Format Details</h2>
+        <p>
+          The <code>.fmrl</code> format stores images as a 16-color indexed palette
+          (index 0 = paper, 1 = ink, 2-15 = grayscale steps) in 128×128 tiles, each
+          zlib-compressed with maximum compression. The <code>AGE</code> chunk
+          carries per-tile consolidation levels and timestamps, rewritten with every save.
         </p>
         <p>
           Use the <strong>Age</strong> buttons to manually age the image.
