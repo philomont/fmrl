@@ -164,213 +164,193 @@ fn min_age_in_region(
     min_age
 }
 
-/// Apply one consolidation step using hierarchical per-pixel aging.
+/// Apply one consolidation step using hierarchical per-pixel aging with gradual block sizes.
 ///
-/// Each pixel has its own age (0-4). On each step, pixels advance ONE level
-/// based on their current age. New drawings (age 0) age properly even when
-/// drawn on top of older content.
-///
-/// A block consolidates when ALL pixels have age <= threshold AND at least one
-/// pixel has age == threshold. This allows mixed-age blocks to consolidate
-/// at the level of the newest (youngest) pixels.
+/// Each pixel has its own age (0-6). On each step, pixels advance ONE level
+/// based on their current age. Uses intermediate block sizes for more gradual aging:
 ///
 /// - Age 0 pixels → 2×2 blocks consolidate (become age 1)
-/// - Age 1 pixels → 4×4 blocks consolidate (become age 2)
-/// - Age 2 pixels → 8×8 blocks consolidate (become age 3)
-/// - Age 3 pixels → 16×16 blocks consolidate (become age 4)
-/// - Age 4+ → paper
+/// - Age 1 pixels → 3×3 blocks consolidate (become age 2)
+/// - Age 2 pixels → 4×4 blocks consolidate (become age 3)
+/// - Age 3 pixels → 6×6 blocks consolidate (become age 4)
+/// - Age 4 pixels → 8×8 blocks consolidate (become age 5)
+/// - Age 5 pixels → 12×12 blocks consolidate (become age 6)
+/// - Age 6 pixels → 16×16 blocks consolidate (become age 7)
+/// - Age 7+ → paper
 pub fn consolidation_step_with_pixel_ages(
     indices: &[u8],
     pixel_ages: &[u8],
     width: usize,
     height: usize,
 ) -> (Vec<u8>, Vec<u8>) {
+    // Debug: log input
+    #[cfg(all(target_arch = "wasm32", feature = "debug-logging"))]
+    {
+        use web_sys::console;
+        console::log_1(&format!("consolidation_step: width={}, height={}, pixel_ages[0..5]={:?}",
+            width, height, &pixel_ages.get(0..5.min(pixel_ages.len())).unwrap_or(&[])).into());
+    }
+
     let result = indices.to_vec();
     let new_ages = pixel_ages.to_vec();
 
+    // Block sizes for each age level: 2, 3, 4, 6, 8, 12, 16
+    const BLOCK_SIZES: [usize; 7] = [2, 3, 4, 6, 8, 12, 16];
+
     // First pass: determine consolidation based on ORIGINAL ages
-    // A block consolidates if:
-    // - ALL pixels have age <= required_age (no pixel is too old)
-    // - At least one pixel has age == required_age (some pixel is ready)
+    // A block consolidates if min_age == age_level (youngest pixel drives it)
+    // Use ceiling division to account for partial blocks at edges
+    let mut should_consolidate: Vec<Vec<bool>> = BLOCK_SIZES.iter().map(|size| {
+        let blocks_x = (width + size - 1) / size;
+        let blocks_y = (height + size - 1) / size;
+        vec![false; blocks_x * blocks_y]
+    }).collect();
 
-    let mut should_consolidate_2x2 = vec![false; (width / 2) * (height / 2)];
-    let mut should_consolidate_4x4 = vec![false; (width / 4) * (height / 4)];
-    let mut should_consolidate_8x8 = vec![false; (width / 8) * (height / 8)];
-    let mut should_consolidate_16x16 = vec![false; (width / 16) * (height / 16)];
+    // Check blocks for each age level
+    let mut total_marked = 0;
+    let mut debug_sample = 0;
+    for (age_level, &block_size) in BLOCK_SIZES.iter().enumerate() {
+        let blocks_x = (width + block_size - 1) / block_size;
+        for y in (0..height).step_by(block_size) {
+            for x in (0..width).step_by(block_size) {
+                let y_end = (y + block_size).min(height);
+                let x_end = (x + block_size).min(width);
 
-    // Check 2×2 blocks: consolidate if min_age == 0
-    // (at least one pixel is age 0 and ready for consolidation)
-    // Pixels with higher ages in the block get reset to participate
-    for y in (0..height).step_by(2) {
-        for x in (0..width).step_by(2) {
-            let y_end = (y + 2).min(height);
-            let x_end = (x + 2).min(width);
+                let min_age = min_age_in_region(
+                    &new_ages, width, x, y, x_end - x, y_end - y
+                );
 
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
-            );
+                // Consolidate if youngest pixel matches this age level
+                if min_age == age_level as u8 {
+                    let index = (y / block_size) * blocks_x + (x / block_size);
+                    should_consolidate[age_level][index] = true;
+                    total_marked += 1;
+                }
 
-            // Consolidate if any pixel is age 0 (youngest drives consolidation)
-            if min_age == 0 {
-                should_consolidate_2x2[(y / 2) * (width / 2) + (x / 2)] = true;
+                // Debug: log first few blocks
+                #[cfg(all(target_arch = "wasm32", feature = "debug-logging"))]
+                if debug_sample < 3 {
+                    use web_sys::console;
+                    console::log_1(&format!("  Block ({},{}) size={} min_age={} age_level={} match={}",
+                        x, y, block_size, min_age, age_level, min_age == age_level as u8).into());
+                    debug_sample += 1;
+                }
             }
         }
     }
 
-    // Check 4×4 blocks: consolidate if min_age == 1
-    // (at least one pixel is age 1 and ready)
-    for y in (0..height).step_by(4) {
-        for x in (0..width).step_by(4) {
-            let y_end = (y + 4).min(height);
-            let x_end = (x + 4).min(width);
-
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
-            );
-
-            if min_age == 1 {
-                should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] = true;
+    #[cfg(all(target_arch = "wasm32", feature = "debug-logging"))]
+    {
+        use web_sys::console;
+        console::log_1(&format!("First pass: {} blocks marked for consolidation", total_marked).into());
+        for (i, sizes) in should_consolidate.iter().enumerate() {
+            let count = sizes.iter().filter(|&&b| b).count();
+            if count > 0 {
+                console::log_1(&format!("  Age level {} ({}x{}): {} blocks", i, BLOCK_SIZES[i], BLOCK_SIZES[i], count).into());
             }
         }
     }
 
-    // Check 8×8 blocks: consolidate if min_age == 2
-    for y in (0..height).step_by(8) {
-        for x in (0..width).step_by(8) {
-            let y_end = (y + 8).min(height);
-            let x_end = (x + 8).min(width);
-
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
-            );
-
-            if min_age == 2 {
-                should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] = true;
-            }
-        }
+    // Second pass: apply consolidation from largest to smallest
+    #[cfg(all(target_arch = "wasm32", feature = "debug-logging"))]
+    {
+        use web_sys::console;
+        console::log_1(&format!("Starting second pass, should_consolidate len={}", should_consolidate.len()).into());
     }
 
-    // Check 16×16 blocks: consolidate if min_age == 3
-    for y in (0..height).step_by(16) {
-        for x in (0..width).step_by(16) {
-            let y_end = (y + 16).min(height);
-            let x_end = (x + 16).min(width);
-
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
-            );
-
-            if min_age == 3 {
-                should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] = true;
-            }
-        }
-    }
-
-    // Second pass: apply consolidation in order from largest to smallest
     let mut final_result = result.clone();
     let mut final_ages = new_ages.clone();
+    // Track which pixels were consolidated (so we don't double-increment their age)
+    let mut was_consolidated = vec![false; width * height];
+    let mut consolidated_count = 0;
 
-    // Apply 16×16 consolidation (age 3 → 4)
-    for y in (0..height).step_by(16) {
-        for x in (0..width).step_by(16) {
-            if should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] {
-                let y_end = (y + 16).min(height);
-                let x_end = (x + 16).min(width);
+    // Apply consolidation in reverse order (largest blocks first)
+    for (age_level, &block_size) in BLOCK_SIZES.iter().enumerate().rev() {
+        let next_age = (age_level + 1) as u8;
 
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
+        #[cfg(all(target_arch = "wasm32", feature = "debug-logging"))]
+        {
+            use web_sys::console;
+            console::log_1(&format!("  Age level {} block_size={} array_len={}", age_level, block_size, should_consolidate[age_level].len()).into());
+        }
 
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        final_result[idx] = min_idx;
-                        final_ages[idx] = 4;
+        let blocks_x = (width + block_size - 1) / block_size;
+        for y in (0..height).step_by(block_size) {
+            for x in (0..width).step_by(block_size) {
+                let index = (y / block_size) * blocks_x + (x / block_size);
+                if index >= should_consolidate[age_level].len() {
+                    #[cfg(all(target_arch = "wasm32", feature = "debug-logging"))]
+                    {
+                        use web_sys::console;
+                        console::log_1(&format!("    INDEX OUT OF BOUNDS: index={} array_len={}", index, should_consolidate[age_level].len()).into());
+                    }
+                    continue;
+                }
+                if should_consolidate[age_level][index] {
+                    let y_end = (y + block_size).min(height);
+                    let x_end = (x + block_size).min(width);
+
+                    let min_idx = min_index_in_region(
+                        &result, width, x, y,
+                        x_end - x, y_end - y
+                    );
+
+                    for by in y..y_end {
+                        for bx in x..x_end {
+                            let idx = by * width + bx;
+                            final_result[idx] = min_idx;
+                            final_ages[idx] = next_age;
+                            was_consolidated[idx] = true;
+                            consolidated_count += 1;
+                        }
                     }
                 }
             }
         }
     }
 
-    // Apply 8×8 consolidation (age 2 → 3)
-    for y in (0..height).step_by(8) {
-        for x in (0..width).step_by(8) {
-            if should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] {
-                let y_end = (y + 8).min(height);
-                let x_end = (x + 8).min(width);
-
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
-
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        final_result[idx] = min_idx;
-                        final_ages[idx] = 3;
-                    }
-                }
-            }
-        }
+    #[cfg(all(target_arch = "wasm32", feature = "debug-logging"))]
+    {
+        use web_sys::console;
+        console::log_1(&format!("Second pass: {} pixels consolidated", consolidated_count).into());
     }
 
-    // Apply 4×4 consolidation (age 1 → 2)
-    for y in (0..height).step_by(4) {
-        for x in (0..width).step_by(4) {
-            if should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] {
-                let y_end = (y + 4).min(height);
-                let x_end = (x + 4).min(width);
-
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
-
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        final_result[idx] = min_idx;
-                        final_ages[idx] = 2;
-                    }
-                }
-            }
-        }
-    }
-
-    // Apply 2×2 consolidation (age 0 → 1)
-    for y in (0..height).step_by(2) {
-        for x in (0..width).step_by(2) {
-            if should_consolidate_2x2[(y / 2) * (width / 2) + (x / 2)] {
-                let y_end = (y + 2).min(height);
-                let x_end = (x + 2).min(width);
-
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
-
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        final_result[idx] = min_idx;
-                        final_ages[idx] = 1;
-                    }
-                }
-            }
-        }
-    }
-
-    // Final pass: pixels with age 4 become paper
+    // Age advancement: pixels that were NOT consolidated increment their age by 1
+    // This ensures they can advance to larger block sizes
     for y in 0..height {
         for x in 0..width {
             let idx = y * width + x;
-            if final_ages[idx] >= 4 {
-                final_result[idx] = PAPER_INDEX;
-                final_ages[idx] = 0;
+            if final_result[idx] != PAPER_INDEX
+                && !was_consolidated[idx]
+                && final_ages[idx] < 7
+            {
+                final_ages[idx] = final_ages[idx].saturating_add(1);
             }
         }
+    }
+
+    // Final pass: pixels with age 7 become paper
+    let mut paper_count = 0;
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            if final_ages[idx] >= 7 {
+                final_result[idx] = PAPER_INDEX;
+                final_ages[idx] = 0;
+                paper_count += 1;
+            }
+        }
+    }
+
+    // Debug: log summary
+    #[cfg(all(target_arch = "wasm32", feature = "debug-logging"))]
+    {
+        use web_sys::console;
+        let non_paper_before = indices.iter().filter(|&&i| i != PAPER_INDEX).count();
+        let non_paper_after = final_result.iter().filter(|&&i| i != PAPER_INDEX).count();
+        console::log_1(&format!("RESULT: non-paper before={}, after={}, became_paper={}, final_ages[0..5]={:?}",
+            non_paper_before, non_paper_after, paper_count,
+            &final_ages.get(0..5.min(final_ages.len())).unwrap_or(&[])).into());
     }
 
     (final_result, final_ages)
@@ -590,4 +570,3 @@ fn is_block_bleachable(block: &[u8; 4]) -> bool {
     // Case 3: 0 or 1 unique indices -> don't bleach (uniform)
     false
 }
-
