@@ -164,46 +164,6 @@ fn min_age_in_region(
     min_age
 }
 
-/// Check if a region has multiple different colors.
-/// Returns true if there are 2+ different indices (including paper=0).
-/// This ensures regions with ink+paper also age (edge erosion).
-fn has_multiple_colors(
-    indices: &[u8],
-    width: usize,
-    x: usize,
-    y: usize,
-    block_w: usize,
-    block_h: usize,
-) -> bool {
-    let x_end = (x + block_w).min(width);
-    let y_end = (y + block_h).min(indices.len() / width);
-
-    let mut first_color: Option<u8> = None;
-    for by in y..y_end {
-        for bx in x..x_end {
-            let idx = indices[by * width + bx];
-            if first_color.is_none() {
-                first_color = Some(idx);
-            } else if Some(idx) != first_color {
-                return true; // Found a different color
-            }
-        }
-    }
-    false // All same color (or single color + paper, but paper counts!)
-}
-
-/// Check if a region is uniform (all pixels have the same index, or all paper).
-fn is_uniform(
-    indices: &[u8],
-    width: usize,
-    x: usize,
-    y: usize,
-    block_w: usize,
-    block_h: usize,
-) -> bool {
-    !has_multiple_colors(indices, width, x, y, block_w, block_h)
-}
-
 /// Apply one consolidation step using hierarchical per-pixel aging.
 ///
 /// Each pixel has its own age (0-4). On each step, pixels advance ONE level
@@ -225,102 +185,195 @@ pub fn consolidation_step_with_pixel_ages(
     width: usize,
     height: usize,
 ) -> (Vec<u8>, Vec<u8>) {
-    let mut result = indices.to_vec();
-    let mut new_ages = pixel_ages.to_vec();
+    let result = indices.to_vec();
+    let new_ages = pixel_ages.to_vec();
 
-    // Interleaved check-and-apply: each level sees ages from previous levels
-    // This ensures that after 2×2 consolidation (age→1), 4×4 sees age=1, etc.
+    // First pass: determine consolidation based on ORIGINAL ages
+    // A block consolidates if:
+    // - ALL pixels have age <= required_age (no pixel is too old)
+    // - At least one pixel has age == required_age (some pixel is ready)
 
-    // Level 1: 2×2 blocks (age 0 → 1)
-    // Only consolidate if block has multiple colors (heterogeneous)
+    let mut should_consolidate_2x2 = vec![false; (width / 2) * (height / 2)];
+    let mut should_consolidate_4x4 = vec![false; (width / 4) * (height / 4)];
+    let mut should_consolidate_8x8 = vec![false; (width / 8) * (height / 8)];
+    let mut should_consolidate_16x16 = vec![false; (width / 16) * (height / 16)];
+
+    // Check 2×2 blocks: consolidate if min_age == 0
+    // (at least one pixel is age 0 and ready for consolidation)
+    // Pixels with higher ages in the block get reset to participate
     for y in (0..height).step_by(2) {
         for x in (0..width).step_by(2) {
             let y_end = (y + 2).min(height);
             let x_end = (x + 2).min(width);
 
-            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
+            let min_age = min_age_in_region(
+                &new_ages, width, x, y, x_end - x, y_end - y
+            );
 
-            if min_age == 0 && has_multiple_colors(indices, width, x, y, x_end - x, y_end - y) {
-                let min_idx = min_index_in_region(indices, width, x, y, x_end - x, y_end - y);
-
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        result[idx] = min_idx;
-                        new_ages[idx] = 1;
-                    }
-                }
+            // Consolidate if any pixel is age 0 (youngest drives consolidation)
+            if min_age == 0 {
+                should_consolidate_2x2[(y / 2) * (width / 2) + (x / 2)] = true;
             }
         }
     }
 
-    // Level 2: 4×4 blocks (age 1 → 2)
-    // Consolidate if min_age == 1 (blocks that consolidated at 2×2)
+    // Check 4×4 blocks: consolidate if min_age == 1
+    // (at least one pixel is age 1 and ready)
     for y in (0..height).step_by(4) {
         for x in (0..width).step_by(4) {
             let y_end = (y + 4).min(height);
             let x_end = (x + 4).min(width);
 
-            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
+            let min_age = min_age_in_region(
+                &new_ages, width, x, y, x_end - x, y_end - y
+            );
 
             if min_age == 1 {
-                let min_idx = min_index_in_region(&result, width, x, y, x_end - x, y_end - y);
-
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        result[idx] = min_idx;
-                        new_ages[idx] = 2;
-                    }
-                }
+                should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] = true;
             }
         }
     }
 
-    // Level 3: 8×8 blocks (age 2 → 3)
+    // Check 8×8 blocks: consolidate if min_age == 2
     for y in (0..height).step_by(8) {
         for x in (0..width).step_by(8) {
             let y_end = (y + 8).min(height);
             let x_end = (x + 8).min(width);
 
-            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
+            let min_age = min_age_in_region(
+                &new_ages, width, x, y, x_end - x, y_end - y
+            );
 
             if min_age == 2 {
-                let min_idx = min_index_in_region(&result, width, x, y, x_end - x, y_end - y);
-
-                for by in y..y_end {
-                    for bx in x..x_end {
-                        let idx = by * width + bx;
-                        result[idx] = min_idx;
-                        new_ages[idx] = 3;
-                    }
-                }
+                should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] = true;
             }
         }
     }
 
-    // Level 4: 16×16 blocks (age 3 → paper)
+    // Check 16×16 blocks: consolidate if min_age == 3
     for y in (0..height).step_by(16) {
         for x in (0..width).step_by(16) {
             let y_end = (y + 16).min(height);
             let x_end = (x + 16).min(width);
 
-            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
+            let min_age = min_age_in_region(
+                &new_ages, width, x, y, x_end - x, y_end - y
+            );
 
             if min_age == 3 {
+                should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] = true;
+            }
+        }
+    }
+
+    // Second pass: apply consolidation in order from largest to smallest
+    let mut final_result = result.clone();
+    let mut final_ages = new_ages.clone();
+
+    // Apply 16×16 consolidation (age 3 → 4)
+    for y in (0..height).step_by(16) {
+        for x in (0..width).step_by(16) {
+            if should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] {
+                let y_end = (y + 16).min(height);
+                let x_end = (x + 16).min(width);
+
+                let min_idx = min_index_in_region(
+                    &result, width, x, y,
+                    x_end - x, y_end - y
+                );
+
                 for by in y..y_end {
                     for bx in x..x_end {
                         let idx = by * width + bx;
-                        result[idx] = PAPER_INDEX;
-                        new_ages[idx] = 0;
+                        final_result[idx] = min_idx;
+                        final_ages[idx] = 4;
                     }
                 }
             }
         }
     }
 
-    // Return the consolidated result and updated ages
-    (result, new_ages)
+    // Apply 8×8 consolidation (age 2 → 3)
+    for y in (0..height).step_by(8) {
+        for x in (0..width).step_by(8) {
+            if should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] {
+                let y_end = (y + 8).min(height);
+                let x_end = (x + 8).min(width);
+
+                let min_idx = min_index_in_region(
+                    &result, width, x, y,
+                    x_end - x, y_end - y
+                );
+
+                for by in y..y_end {
+                    for bx in x..x_end {
+                        let idx = by * width + bx;
+                        final_result[idx] = min_idx;
+                        final_ages[idx] = 3;
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply 4×4 consolidation (age 1 → 2)
+    for y in (0..height).step_by(4) {
+        for x in (0..width).step_by(4) {
+            if should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] {
+                let y_end = (y + 4).min(height);
+                let x_end = (x + 4).min(width);
+
+                let min_idx = min_index_in_region(
+                    &result, width, x, y,
+                    x_end - x, y_end - y
+                );
+
+                for by in y..y_end {
+                    for bx in x..x_end {
+                        let idx = by * width + bx;
+                        final_result[idx] = min_idx;
+                        final_ages[idx] = 2;
+                    }
+                }
+            }
+        }
+    }
+
+    // Apply 2×2 consolidation (age 0 → 1)
+    for y in (0..height).step_by(2) {
+        for x in (0..width).step_by(2) {
+            if should_consolidate_2x2[(y / 2) * (width / 2) + (x / 2)] {
+                let y_end = (y + 2).min(height);
+                let x_end = (x + 2).min(width);
+
+                let min_idx = min_index_in_region(
+                    &result, width, x, y,
+                    x_end - x, y_end - y
+                );
+
+                for by in y..y_end {
+                    for bx in x..x_end {
+                        let idx = by * width + bx;
+                        final_result[idx] = min_idx;
+                        final_ages[idx] = 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Final pass: pixels with age 4 become paper
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            if final_ages[idx] >= 4 {
+                final_result[idx] = PAPER_INDEX;
+                final_ages[idx] = 0;
+            }
+        }
+    }
+
+    (final_result, final_ages)
 }
 
 /// Find the maximum age in a region.
