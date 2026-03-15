@@ -476,6 +476,14 @@ function _doAgeStep(src, full = true) {
 
 function applyAge(n = 1) {
     try {
+        // If in text mode, age the base indices (without text/cursor), then re-apply text
+        const wasInTextMode = textMode && textCursor;
+        const savedTextBuffer = wasInTextMode ? textBuffer : null;
+        if (wasInTextMode) {
+            // Bake the text first so we age the complete image
+            if (textBuffer) _blitText(textBuffer);
+        }
+
         // For consolidation mode (age type 1), use per-pixel ages directly
         if (currentAgeType === 1) {
             // Initialize pixel ages if needed
@@ -1179,6 +1187,18 @@ async function main() {
                 indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
                 currentAgeLevels = null;
                 currentPixelAges = null;
+                break;
+            case 'f':
+            case 'F':
+                e.preventDefault();
+                const ageTypeSelect = document.getElementById('age-type-select');
+                const ageTypes = Array.from(ageTypeSelect.options);
+                const currentAgeIdx = ageTypes.findIndex(o => o.value === ageTypeSelect.value);
+                const nextAgeIdx = (currentAgeIdx + 1) % ageTypes.length;
+                ageTypeSelect.value = ageTypes[nextAgeIdx].value;
+                currentAgeType = parseInt(ageTypes[nextAgeIdx].value, 10);
+                const ageTypeNames = ['Erosion', 'Consolidation', 'Bleach'];
+                console.log('Age type changed to:', ageTypeNames[currentAgeType] || 'Unknown');
                 break;
         }
     });

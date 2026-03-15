@@ -108,10 +108,12 @@ import init, {
 |-----|--------|
 | `Space` | Age one step |
 | `a` | Toggle auto-aging |
+| `f` | Cycle through aging algorithms |
 | `t` | Cycle through themes |
 | `↑` (Up) | Increase aging speed (slower interval) |
 | `↓` (Down) | Decrease aging speed (faster interval) |
 | `Delete` / `Backspace` | Clear canvas |
+| `Esc` | Exit text mode |
 
 **Note**: Hotkeys are disabled when in text mode or when any input/textarea is focused.
 
