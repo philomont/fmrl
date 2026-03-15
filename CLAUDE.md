@@ -34,10 +34,10 @@ cargo test <test_name>   # Run a single test
 # Lint
 cargo clippy
 
-# Serve web demo locally
-npx serve -l 3000 wasm/
+# Serve web demo locally (port 8080)
+just serve
 # or
-python -m http.server 3000 --directory wasm/
+python3 -m http.server 8080 --directory docs/
 ```
 
 ## Architecture

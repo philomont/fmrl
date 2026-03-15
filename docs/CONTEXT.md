@@ -165,9 +165,16 @@ The web app is static files - no build step required for JS/CSS.
 WASM must be built from Rust:
 
 ```bash
-wasm-pack build --target web
-# Output goes to docs/pkg/
+# Using just (recommended)
+just deploy-all    # Build WASM, sync themes, copy to docs, serve on :8080
+
+# Or manually
+wasm-pack build --target web --features wasm
+cp -r pkg docs/
+python3 -m http.server 8080 --directory docs/
 ```
+
+Server runs on **port 8080**. Use `just halt` to stop the server.
 
 ## Browser Compatibility
 
