@@ -1,4 +1,4 @@
-use fmrl::age_step;
+use fmrl::age_by_erosion;
 use fmrl::encode::{FmrlImage, encode};
 use fmrl::format::Palette;
 
@@ -74,7 +74,7 @@ fn aging_converges_to_all_paper() {
 
     let max_steps = 300;
     for step in 1..=max_steps {
-        indices = age_step(&indices, w, h);
+        indices = age_by_erosion(&indices, w, h);
 
         // Check for all paper (index 0 in v0.4+)
         if indices.iter().all(|&p| p == 0) {
@@ -118,7 +118,7 @@ fn aging_reduces_file_size_over_many_steps() {
     let initial_size = encoded_size(&indices, w, h, &palette);
 
     for _ in 0..30 {
-        indices = age_step(&indices, w, h);
+        indices = age_by_erosion(&indices, w, h);
     }
 
     let _reduced_size = encoded_size(&indices, w, h, &palette);
@@ -139,7 +139,7 @@ fn checkerboard_converges_to_all_paper() {
         .collect();
 
     for step in 1..=200 {
-        indices = age_step(&indices, w, h);
+        indices = age_by_erosion(&indices, w, h);
         // Check for all paper (index 0 in v0.4+)
         if indices.iter().all(|&p| p == 0) {
             let size = encoded_size(&indices, w, h, &palette);
@@ -160,14 +160,14 @@ fn single_pixel_erased_in_one_step() {
     // Single ink pixel (index 1) in v0.4+ format
     indices[64 * w + 64] = 1;
 
-    let aged = age_step(&indices, w, h);
+    let aged = age_by_erosion(&indices, w, h);
     assert!(
         aged.iter().all(|&p| p == 0),
         "a single isolated pixel should be erased in one step"
     );
 }
 
-/// age_step must never introduce new non-paper pixels.
+/// age_by_erosion must never introduce new non-paper pixels.
 #[test]
 fn aging_never_introduces_non_paper() {
     let w = 128usize;
@@ -181,11 +181,11 @@ fn aging_never_introduces_non_paper() {
     for _ in 0..20 {
         // Count non-paper pixels (anything other than index 0)
         let before_non_paper: usize = indices.iter().filter(|&&p| p != 0).count();
-        indices = age_step(&indices, w, h);
+        indices = age_by_erosion(&indices, w, h);
         let after_non_paper: usize = indices.iter().filter(|&&p| p != 0).count();
         assert!(
             after_non_paper <= before_non_paper,
-            "age_step introduced non-paper pixels: {after_non_paper} > {before_non_paper}"
+            "age_by_erosion introduced non-paper pixels: {after_non_paper} > {before_non_paper}"
         );
     }
 }

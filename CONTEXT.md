@@ -25,17 +25,17 @@ src/
 
 Three distinct aging methodologies are supported:
 
-1. **Erosion** (`age_step`)
+1. **Erosion** (`age_by_erosion`)
    - Morphological erosion + short-run elimination
    - Gradual edge erosion preserving core regions
    - Two-pass: neighbor check, then run-length elimination
 
-2. **Consolidation** (`consolidation_step_with_pixel_ages`)
+2. **Consolidation** (`age_by_consolidation`)
    - Hierarchical block merging (2×2 → 4×4 → 8×8 → 16×16)
    - Per-pixel age tracking
    - Youngest pixel in block drives consolidation
 
-3. **Bleach** (`bleach_step`)
+3. **Bleach** (`age_by_bleaching`)
    - Convolutional 2×2 window detection
    - Targets noisy/complex patterns
    - Preserves uniform regions
@@ -59,7 +59,7 @@ The `wasm.rs` module exposes:
 
 ### Functions
 
-- `*_step` - Apply one step of an algorithm (e.g., `age_step`, `bleach_step`)
+- `age_by_*` - Apply one step of an aging algorithm (e.g., `age_by_erosion`, `age_by_consolidation`, `age_by_bleaching`)
 - `*_with_*` - Variant with additional parameters
 - `min_*_in_region` - Region query functions
 - `is_*_bleachable` - Boolean check functions

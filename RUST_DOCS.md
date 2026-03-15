@@ -12,9 +12,11 @@ Core aging implementations. All algorithms follow the pattern of taking indices 
 
 #### Functions
 
-- `age_step(indices, width, height)` - Erosion-based aging
-- `consolidation_step_with_pixel_ages(indices, pixel_ages, width, height)` - Block consolidation
-- `bleach_step(indices, width, height)` - Pattern-based bleaching
+- `age_by_erosion(indices, width, height)` - Erosion-based aging (morphological erosion + short-run elimination)
+- `age_by_consolidation(indices, pixel_ages, width, height)` - Block consolidation (hierarchical 2×2 → 4×4 → 8×8 → 16×16)
+- `age_by_bleaching(indices, width, height)` - Pattern-based bleaching (2×2 convolutional detection)
+
+*Legacy aliases (deprecated): `age_step`, `consolidation_step_with_pixel_ages`, `bleach_step`*
 
 ### `encode` - Encoding
 
@@ -63,9 +65,16 @@ let decoded = decode(&bytes).unwrap();
 ### Applying aging:
 
 ```rust
-use fmrl::age::consolidation_step_with_pixel_ages;
+use fmrl::age::{age_by_erosion, age_by_consolidation, age_by_bleaching};
 
-let (new_indices, new_ages) = consolidation_step_with_pixel_ages(
+// Erosion-based aging
+let eroded = age_by_erosion(&indices, width, height);
+
+// Consolidation with per-pixel ages
+let (new_indices, new_ages) = age_by_consolidation(
     &indices, &ages, width, height
 );
+
+// Pattern-based bleaching
+let bleached = age_by_bleaching(&indices, width, height);
 ```

@@ -2,7 +2,9 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::age::{age_step, bleach_step, consolidation_step, consolidation_step_with_pixel_ages};
+use crate::age::{age_by_erosion, age_by_consolidation, age_by_bleaching, consolidation_step_with_age};
+#[allow(deprecated)]
+use crate::age::{consolidation_step_with_pixel_ages, bleach_step};
 use crate::decode::{DecodedFmrl, decode};
 use crate::encode::{FmrlImage, encode};
 use crate::format::{AgeType, ColorMode, Palette, TILE_SIZE};
@@ -331,7 +333,7 @@ pub fn consolidation_step_with_ages(
 ) -> Vec<u8> {
     let w = width as usize;
     let h = height as usize;
-    let (new_indices, new_ages) = consolidation_step_with_pixel_ages(indices, pixel_ages, w, h);
+    let (new_indices, new_ages) = age_by_consolidation(indices, pixel_ages, w, h);
 
     // Concatenate results: indices first, then ages
     let mut result = Vec::with_capacity(w * h * 2);
@@ -345,10 +347,10 @@ pub fn consolidation_step_with_ages(
 /// `data` must be `width * height` bytes of palette indices.
 /// Each 2×2 block becomes one pixel with the most common index (lowest wins ties).
 /// Result is upscaled back to original dimensions by duplication.
-/// See `age::consolidation_step` for the full algorithm description.
+/// See `age::age_by_consolidation` for the full algorithm description.
 #[wasm_bindgen]
 pub fn consolidation_step_indices(data: &[u8], width: u16, height: u16) -> Vec<u8> {
-    consolidation_step(data, width as usize, height as usize)
+    consolidation_step_with_age(data, width as usize, height as usize, &mut vec![0u8; ((width as usize / 32) * (height as usize / 32)).max(1)])
 }
 
 /// Apply one convolutional bleach step.
@@ -357,10 +359,10 @@ pub fn consolidation_step_indices(data: &[u8], width: u16, height: u16) -> Vec<u
 /// - If 3+ different indices in 2×2 block → becomes paper
 /// - If 2 indices with unequal counts → becomes paper
 /// - If 2 indices with equal counts (2 each) AND diagonal pattern → becomes paper
-/// See `age::bleach_step` for the full algorithm description.
+/// See `age::age_by_bleaching` for the full algorithm description.
 #[wasm_bindgen]
 pub fn bleach_step_indices(data: &[u8], width: u16, height: u16) -> Vec<u8> {
-    bleach_step(data, width as usize, height as usize)
+    age_by_bleaching(data, width as usize, height as usize)
 }
 
 /// Create a fresh demo .fmrl file with a manuscript-like pattern.
