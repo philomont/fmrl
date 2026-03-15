@@ -122,8 +122,15 @@ import init, {
 **Toolbar (left):**
 - 4 color swatches (indices 1, 8, 15, 0)
 - 3 brush size buttons (2, 6, 14)
-- Text tool button
+- Text tool button (stamp mode — see below)
 - Color editor button
+
+**Text Tool (Stamp Mode):**
+- Click canvas to place cursor, type to build text
+- Text is rendered to a temporary overlay (not committed to canvas yet)
+- `Return`: Commit text to canvas, move to next line, continue typing
+- `Escape`: Discard text, exit text mode, restore previous drawing tool
+- Text is only encoded/saved after being committed with Return
 
 **Action bar (bottom):**
 - Age / Age ×10 buttons
