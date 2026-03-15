@@ -694,7 +694,7 @@ function setPassiveAging(enabled) {
 // Enter advances to the next line; Escape cancels without committing.
 // Switching tools commits any pending text.
 
-const BRUSH_FONT = { 2: 24, 6: 56, 14: 112 };
+const BRUSH_FONT = { 2: 48, 6: 112, 14: 224 };
 function textFontSize() { return BRUSH_FONT[brushSize] ?? Math.round(brushSize * 3); }
 
 let textMode        = false;
