@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Context Files
 
 For detailed module documentation, see:
-- `CONTEXT.md` — Rust codec architecture, aging algorithms, naming conventions
+- `src/CONTEXT.md` — Rust codec architecture, aging algorithms, naming conventions
 - `docs/CONTEXT.md` — Web app structure, WASM integration, UI components
 
 ## Project Overview
@@ -121,10 +121,10 @@ Aging algorithms live in Rust (`src/age.rs`):
 ### Source Layout
 
 ```
-├── CONTEXT.md          # Rust codec documentation (see this!)
 ├── CLAUDE.md           # This file — high-level project guidance
-├── RUST_DOCS.md        # Rust crate API documentation
 ├── src/
+│   CONTEXT.md          # Rust codec documentation (see this!)
+│   RUST_DOCS.md        # Rust crate API documentation
 │   lib.rs              # Core encoder/decoder + public API
 │   format.rs           # File format definitions: ColorMode, Palette, IHDR, AgeType, chunks, CRC
 │   encode.rs           # Encoding: indexed/RGBA modes, quantization, aging algorithms
