@@ -9,7 +9,9 @@ pub mod prng;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
-pub use age::age_step;
+pub use age::{age_by_erosion, age_by_consolidation, age_by_bleaching};
+#[allow(deprecated)]
+pub use age::{age_step, consolidation_step_with_pixel_ages, bleach_step};
 pub use decode::{DecodedFmrl, TileData, decode, patch_age_chunk};
 pub use encode::{FmrlImage, encode};
 pub use error::FmrlError;

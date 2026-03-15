@@ -149,7 +149,7 @@ if (Symbol.dispose) FmrlView.prototype[Symbol.dispose] = FmrlView.prototype.free
  * - If 3+ different indices in 2×2 block → becomes paper
  * - If 2 indices with unequal counts → becomes paper
  * - If 2 indices with equal counts (2 each) AND diagonal pattern → becomes paper
- * See `age::bleach_step` for the full algorithm description.
+ * See `age::age_by_bleaching` for the full algorithm description.
  * @param {Uint8Array} data
  * @param {number} width
  * @param {number} height
@@ -170,7 +170,7 @@ export function bleach_step_indices(data, width, height) {
  * `data` must be `width * height` bytes of palette indices.
  * Each 2×2 block becomes one pixel with the most common index (lowest wins ties).
  * Result is upscaled back to original dimensions by duplication.
- * See `age::consolidation_step` for the full algorithm description.
+ * See `age::age_by_consolidation` for the full algorithm description.
  * @param {Uint8Array} data
  * @param {number} width
  * @param {number} height

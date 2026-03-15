@@ -3,7 +3,7 @@ use std::io::Write;
 use flate2::Compression;
 use flate2::write::ZlibEncoder;
 
-use crate::age::{age_step, bleach_step, consolidation_step_with_age, consolidation_step_with_pixel_ages};
+use crate::age::{age_by_erosion, age_by_consolidation, age_by_bleaching, consolidation_step_with_age};
 use crate::error::FmrlError;
 use crate::format::{
     AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
@@ -218,12 +218,12 @@ fn encode_indexed(
 
     indices = match image.age_type {
         AgeType::Erosion => {
-            age_step(&indices, w, h)
+            age_by_erosion(&indices, w, h)
         }
         AgeType::Consolidation => {
             // Use per-pixel ages if available
             if image.pixel_ages.is_some() {
-                let (new_indices, new_pixel_ages) = consolidation_step_with_pixel_ages(
+                let (new_indices, new_pixel_ages) = age_by_consolidation(
                     &indices, &pixel_ages, w, h
                 );
                 // Compute tile-level ages from per-pixel ages (max age in tile)
@@ -252,7 +252,7 @@ fn encode_indexed(
         }
         AgeType::Bleach => {
             // Convolutional bleach: 2x2 blocks with mixed/diagonal patterns become paper
-            bleach_step(&indices, w, h)
+            age_by_bleaching(&indices, w, h)
         }
     };
 

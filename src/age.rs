@@ -7,7 +7,7 @@ const RUN_THRESHOLD: usize = 2;
 /// Paper index - pixels with this index don't age and are the erosion target.
 const PAPER_INDEX: u8 = 0;
 
-/// Apply one aging step to a flat, row-major array of palette indices.
+/// Apply one erosion aging step to a flat, row-major array of palette indices.
 ///
 /// `indices` is `width × height` bytes; each byte is a palette index where
 /// `0` means paper.  Returns a new Vec with the aged indices.
@@ -28,7 +28,7 @@ const PAPER_INDEX: u8 = 0;
 /// Because both passes only convert to paper, the information content of the
 /// image is strictly non-increasing.  Repeated application eventually renders
 /// all pixels paper (all indices equal 0).
-pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
+pub fn age_by_erosion(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
     let mut next = indices.to_vec();
     let w = width;
     let h = height;
@@ -108,6 +108,11 @@ pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
     next
 }
 
+/// Alias for `age_by_erosion` for backward compatibility.
+#[deprecated(since = "0.4.0", note = "Use `age_by_erosion` instead")]
+pub fn age_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
+    age_by_erosion(indices, width, height)
+}
 
 /// Find the minimum non-zero index in a region.
 /// Returns 0 (paper) if all pixels are paper.
@@ -164,7 +169,7 @@ fn min_age_in_region(
     min_age
 }
 
-/// Apply one consolidation step using hierarchical per-pixel aging.
+/// Apply one consolidation aging step using hierarchical per-pixel aging.
 ///
 /// Each pixel has its own age (0-4). On each step, pixels advance ONE level
 /// based on their current age. New drawings (age 0) age properly even when
@@ -179,7 +184,7 @@ fn min_age_in_region(
 /// - Age 2 pixels → 8×8 blocks consolidate (become age 3)
 /// - Age 3 pixels → 16×16 blocks consolidate (become age 4)
 /// - Age 4+ → paper
-pub fn consolidation_step_with_pixel_ages(
+pub fn age_by_consolidation(
     indices: &[u8],
     pixel_ages: &[u8],
     width: usize,
@@ -376,6 +381,17 @@ pub fn consolidation_step_with_pixel_ages(
     (final_result, final_ages)
 }
 
+/// Alias for `age_by_consolidation` for backward compatibility.
+#[deprecated(since = "0.4.0", note = "Use `age_by_consolidation` instead")]
+pub fn consolidation_step_with_pixel_ages(
+    indices: &[u8],
+    pixel_ages: &[u8],
+    width: usize,
+    height: usize,
+) -> (Vec<u8>, Vec<u8>) {
+    age_by_consolidation(indices, pixel_ages, width, height)
+}
+
 /// Find the maximum age in a region.
 fn max_age_in_region(
     ages: &[u8],
@@ -432,7 +448,7 @@ pub fn consolidation_step_with_age(
     }
 
     // Apply consolidation with per-pixel ages
-    let (result, new_per_pixel_age) = consolidation_step_with_pixel_ages(
+    let (result, new_per_pixel_age) = age_by_consolidation(
         indices,
         &per_pixel_age,
         width,
@@ -470,7 +486,7 @@ pub fn consolidation_step(indices: &[u8], width: usize, height: usize) -> Vec<u8
     consolidation_step_with_age(indices, width, height, &mut dummy_age)
 }
 
-/// Apply one convolutional bleach step using SLIDING 2×2 windows.
+/// Apply one convolutional bleach aging step using SLIDING 2×2 windows.
 ///
 /// Unlike tile-based processing, this slides a 2×2 window across EVERY pixel
 /// position, checking all overlapping windows. Any pixel that is part of
@@ -491,7 +507,7 @@ pub fn consolidation_step(indices: &[u8], width: usize, height: usize) -> Vec<u8
 /// Examples that remain unchanged:
 /// - [[1,1],[1,1]] (all same)
 /// - [[1,1],[1,2]] (3 same, 1 different)
-pub fn bleach_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
+pub fn age_by_bleaching(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
     let mut result = indices.to_vec();
 
     // Track which pixels should be bleached (part of any bleachable window)
@@ -589,5 +605,11 @@ fn is_block_bleachable(block: &[u8; 4]) -> bool {
 
     // Case 3: 0 or 1 unique indices -> don't bleach (uniform)
     false
+}
+
+/// Alias for `age_by_bleaching` for backward compatibility.
+#[deprecated(since = "0.4.0", note = "Use `age_by_bleaching` instead")]
+pub fn bleach_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
+    age_by_bleaching(indices, width, height)
 }
 

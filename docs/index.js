@@ -353,7 +353,8 @@ function render() {
     const imgData = ctx.createImageData(W, H);
     const palette = getThemePalette();
     for (let i = 0; i < W * H; i++) {
-        const idx = indices[i];
+        // Check text overlay first (stamp layer), then fall back to indices
+        let idx = textOverlay && textOverlay[i] !== 0 ? textOverlay[i] : indices[i];
         // Explicit mapping for web app display:
         // 0 → paper, 1 → ink, 2 → accent, 15 → highlight
         let color;
@@ -476,6 +477,14 @@ function _doAgeStep(src, full = true) {
 
 function applyAge(n = 1) {
     try {
+        // If in text mode, age the base indices (without text/cursor), then re-apply text
+        const wasInTextMode = textMode && textCursor;
+        const savedTextBuffer = wasInTextMode ? textBuffer : null;
+        if (wasInTextMode) {
+            // Bake the text first so we age the complete image
+            if (textBuffer) _blitText(textBuffer);
+        }
+
         // For consolidation mode (age type 1), use per-pixel ages directly
         if (currentAgeType === 1) {
             // Initialize pixel ages if needed
@@ -685,13 +694,14 @@ function setPassiveAging(enabled) {
 // Enter advances to the next line; Escape cancels without committing.
 // Switching tools commits any pending text.
 
-const BRUSH_FONT = { 2: 40, 6: 80, 14: 120 };
+const BRUSH_FONT = { 2: 48, 6: 112, 14: 224 };
 function textFontSize() { return BRUSH_FONT[brushSize] ?? Math.round(brushSize * 3); }
 
 let textMode        = false;
 let textCursor      = null;
 let textBuffer      = '';
 let textBaseIndices = null;
+let textOverlay     = null;  // Temporary overlay for stamp-like text rendering
 let cursorBlink     = true;
 let cursorTimer     = null;
 
@@ -714,19 +724,16 @@ function setTextMode(on) {
     textMode = on;
     if (!on) {
         stopCursorBlink();
-        if (textCursor) {
-            if (textBuffer) {
-                _blitText(textBuffer);      // bake glyphs without the cursor bar
-            } else if (textBaseIndices) {
-                indices.set(textBaseIndices); // nothing typed — clear cursor artifact
-                render();
-            }
+        // Commit text to indices when exiting text mode (tool switch, etc.)
+        if (textCursor && textBuffer && textOverlay) {
+            _commitTextOverlay();
         }
-        textCursor = null; textBuffer = ''; textBaseIndices = null;
+        textCursor = null; textBuffer = ''; textBaseIndices = null; textOverlay = null;
         canvas.style.cursor = 'crosshair';
         document.getElementById('tool-text').classList.remove('active');
+        render();
     } else {
-        textCursor = null; textBuffer = ''; textBaseIndices = null;
+        textCursor = null; textBuffer = ''; textBaseIndices = null; textOverlay = null;
         canvas.style.cursor = 'text';
         document.getElementById('tool-text').classList.add('active');
     }
@@ -734,18 +741,14 @@ function setTextMode(on) {
 
 function placeTextCursor(cx, cy) {
     // Commit anything already typed before moving the cursor.
-    if (textCursor !== null) {
+    if (textCursor !== null && textBuffer && textOverlay) {
         stopCursorBlink();
-        if (textBuffer) {
-            _blitText(textBuffer);
-        } else if (textBaseIndices) {
-            indices.set(textBaseIndices);
-            render();
-        }
+        _commitTextOverlay();
     }
     textCursor      = { x: cx, y: cy };
     textBuffer      = '';
     textBaseIndices = indices.slice();
+    textOverlay     = new Uint8Array(W * H);  // Initialize empty overlay
     startCursorBlink();
 }
 
@@ -763,9 +766,25 @@ function stopCursorBlink() {
     cursorTimer = null;
 }
 
+// Commit the text overlay to the actual indices (stamp the text)
+function _commitTextOverlay() {
+    if (!textOverlay) return;
+    for (let i = 0; i < W * H; i++) {
+        if (textOverlay[i] !== 0) {
+            indices[i] = textOverlay[i];
+            // Reset pixel age to 0 for newly drawn text (in consolidation mode)
+            if (currentPixelAges) {
+                currentPixelAges[i] = 0;
+            }
+        }
+    }
+}
+
 function _blitText(text) {
     if (!textCursor) return;
-    if (textBaseIndices) indices.set(textBaseIndices);
+    // Clear overlay and render text to it (not to indices yet)
+    if (!textOverlay) textOverlay = new Uint8Array(W * H);
+    textOverlay.fill(0);
     if (!text) { render(); return; }
 
     const ctx = getTextCtx();
@@ -792,11 +811,7 @@ function _blitText(text) {
         for (let row = 0; row < bh; row++) {
             for (let col = 0; col < bw; col++) {
                 if (img.data[(row * bw + col) * 4 + 3] > 64) {
-                    indices[(y0 + row) * W + (x0 + col)] = colorIdx;
-                    // Reset pixel age to 0 for newly drawn text (in consolidation mode)
-                    if (currentPixelAges) {
-                        currentPixelAges[(y0 + row) * W + (x0 + col)] = 0;
-                    }
+                    textOverlay[(y0 + row) * W + (x0 + col)] = colorIdx;
                 }
             }
         }
@@ -1095,19 +1110,26 @@ async function main() {
         e.preventDefault();
         if (e.key === 'Escape') {
             stopCursorBlink();
-            if (textBaseIndices) { indices.set(textBaseIndices); render(); }
+            // Discard text (don't commit overlay), restore previous tool
+            textOverlay = null;
             textCursor = null; textBuffer = ''; textBaseIndices = null;
+            // Exit text mode and restore previous tool
+            setTextMode(false);
+            restoreToolState();
             return;
         }
         if (e.key === 'Enter') {
             const lineH = Math.round(textFontSize() * 1.4);
             stopCursorBlink();
-            if (textBuffer) _blitText(textBuffer);
-            else if (textBaseIndices) { /* nothing typed, cursor stays clean */ }
+            // Commit the text overlay to indices
+            if (textBuffer && textOverlay) {
+                _commitTextOverlay();
+            }
             const newY = textCursor.y + lineH;
             textCursor      = { x: textCursor.x, y: newY };
             textBuffer      = '';
             textBaseIndices = indices.slice();
+            textOverlay     = new Uint8Array(W * H);  // Fresh overlay for next line
             startCursorBlink();
             return;
         }
@@ -1119,6 +1141,79 @@ async function main() {
         if (e.key.length === 1) {
             textBuffer += e.key;
             _blitText(textBuffer + (cursorBlink ? '|' : ''));
+        }
+    });
+
+    // ── Global Keyboard Shortcuts ────────────────────────────────────────────
+    // Space: age one step, 'a': toggle auto aging, 't': toggle themes
+    // Up/Down: change aging speed, Delete: clear canvas
+    // Ignored when in text mode or when inputs are focused
+    document.addEventListener('keydown', e => {
+        // Ignore if in text mode
+        if (textMode) return;
+
+        // Ignore if typing in an input, textarea, or contenteditable
+        const tag = document.activeElement?.tagName?.toLowerCase();
+        const isEditable = document.activeElement?.isContentEditable;
+        if (tag === 'input' || tag === 'textarea' || isEditable) return;
+
+        switch (e.key) {
+            case ' ':
+                e.preventDefault();
+                applyAge(1);
+                break;
+            case 'a':
+            case 'A':
+                e.preventDefault();
+                const passiveBtn = document.getElementById('btn-passive');
+                setPassiveAging(!passiveBtn.classList.contains('active'));
+                break;
+            case 't':
+            case 'T':
+                e.preventDefault();
+                const themeSelect = document.getElementById('theme-select');
+                const themes = Array.from(themeSelect.options).filter(o => !o.disabled);
+                const currentIdx = themes.findIndex(o => o.value === themeSelect.value);
+                const nextIdx = (currentIdx + 1) % themes.length;
+                themeSelect.value = themes[nextIdx].value;
+                setTheme(themes[nextIdx].value);
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                if (passiveRateIdx > 0) {
+                    passiveRateIdx--;
+                    updateRateDisplay();
+                    if (passiveTimer) setPassiveAging(true);
+                }
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                if (passiveRateIdx < PASSIVE_RATES_S.length - 1) {
+                    passiveRateIdx++;
+                    updateRateDisplay();
+                    if (passiveTimer) setPassiveAging(true);
+                }
+                break;
+            case 'Delete':
+            case 'Backspace':
+                e.preventDefault();
+                setTextMode(false);
+                indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
+                currentAgeLevels = null;
+                currentPixelAges = null;
+                break;
+            case 'f':
+            case 'F':
+                e.preventDefault();
+                const ageTypeSelect = document.getElementById('age-type-select');
+                const ageTypes = Array.from(ageTypeSelect.options);
+                const currentAgeIdx = ageTypes.findIndex(o => o.value === ageTypeSelect.value);
+                const nextAgeIdx = (currentAgeIdx + 1) % ageTypes.length;
+                ageTypeSelect.value = ageTypes[nextAgeIdx].value;
+                currentAgeType = parseInt(ageTypes[nextAgeIdx].value, 10);
+                const ageTypeNames = ['Erosion', 'Consolidation', 'Bleach'];
+                console.log('Age type changed to:', ageTypeNames[currentAgeType] || 'Unknown');
+                break;
         }
     });
 
@@ -1151,6 +1246,8 @@ async function main() {
             const prev = document.querySelector('.brush-btn[data-size]');
             if (prev && !document.querySelector('.brush-btn.active')) prev.classList.add('active');
         } else {
+            // Remember current tool before switching to text mode
+            rememberToolState();
             document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
             setTextMode(true);
             document.getElementById('tool-text').classList.add('active');
@@ -1159,7 +1256,7 @@ async function main() {
 
     // ── Age controls ─────────────────────────────────────────────────────────
     document.getElementById('btn-age').addEventListener('click',   () => applyAge(1));
-    document.getElementById('btn-age10').addEventListener('click', () => applyAge(10));
+    // Keyboard shortcuts (see keydown handler below)
     document.getElementById('btn-passive').addEventListener('click', e =>
         setPassiveAging(!e.currentTarget.classList.contains('active')));
     document.getElementById('btn-rate-down').addEventListener('click', () => {
