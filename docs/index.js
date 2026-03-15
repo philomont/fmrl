@@ -1246,6 +1246,8 @@ async function main() {
             const prev = document.querySelector('.brush-btn[data-size]');
             if (prev && !document.querySelector('.brush-btn.active')) prev.classList.add('active');
         } else {
+            // Remember current tool before switching to text mode
+            rememberToolState();
             document.querySelectorAll('.brush-btn').forEach(b => b.classList.remove('active'));
             setTextMode(true);
             document.getElementById('tool-text').classList.add('active');
