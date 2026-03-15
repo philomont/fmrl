@@ -102,6 +102,19 @@ import init, {
 3. **Loading**: file input → loadFmrl → decode_to_indices → render
 4. **Theming**: select change → setTheme → updateSwatchColors → render
 
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Space` | Age one step |
+| `a` | Toggle auto-aging |
+| `t` | Cycle through themes |
+| `↑` (Up) | Increase aging speed (slower interval) |
+| `↓` (Down) | Decrease aging speed (faster interval) |
+| `Delete` / `Backspace` | Clear canvas |
+
+**Note**: Hotkeys are disabled when in text mode or when any input/textarea is focused.
+
 ### UI Components
 
 **Toolbar (left):**

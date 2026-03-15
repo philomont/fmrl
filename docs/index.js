@@ -1122,6 +1122,67 @@ async function main() {
         }
     });
 
+    // ── Global Keyboard Shortcuts ────────────────────────────────────────────
+    // Space: age one step, 'a': toggle auto aging, 't': toggle themes
+    // Up/Down: change aging speed, Delete: clear canvas
+    // Ignored when in text mode or when inputs are focused
+    document.addEventListener('keydown', e => {
+        // Ignore if in text mode
+        if (textMode) return;
+
+        // Ignore if typing in an input, textarea, or contenteditable
+        const tag = document.activeElement?.tagName?.toLowerCase();
+        const isEditable = document.activeElement?.isContentEditable;
+        if (tag === 'input' || tag === 'textarea' || isEditable) return;
+
+        switch (e.key) {
+            case ' ':
+                e.preventDefault();
+                applyAge(1);
+                break;
+            case 'a':
+            case 'A':
+                e.preventDefault();
+                const passiveBtn = document.getElementById('btn-passive');
+                setPassiveAging(!passiveBtn.classList.contains('active'));
+                break;
+            case 't':
+            case 'T':
+                e.preventDefault();
+                const themeSelect = document.getElementById('theme-select');
+                const themes = Array.from(themeSelect.options).filter(o => !o.disabled);
+                const currentIdx = themes.findIndex(o => o.value === themeSelect.value);
+                const nextIdx = (currentIdx + 1) % themes.length;
+                themeSelect.value = themes[nextIdx].value;
+                setTheme(themes[nextIdx].value);
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                if (passiveRateIdx > 0) {
+                    passiveRateIdx--;
+                    updateRateDisplay();
+                    if (passiveTimer) setPassiveAging(true);
+                }
+                break;
+            case 'ArrowDown':
+                e.preventDefault();
+                if (passiveRateIdx < PASSIVE_RATES_S.length - 1) {
+                    passiveRateIdx++;
+                    updateRateDisplay();
+                    if (passiveTimer) setPassiveAging(true);
+                }
+                break;
+            case 'Delete':
+            case 'Backspace':
+                e.preventDefault();
+                setTextMode(false);
+                indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
+                currentAgeLevels = null;
+                currentPixelAges = null;
+                break;
+        }
+    });
+
     // ── Palette ─────────────────────────────────────────────────────────────
     document.querySelectorAll('.swatch').forEach(btn =>
         btn.addEventListener('click', () => {
@@ -1159,7 +1220,7 @@ async function main() {
 
     // ── Age controls ─────────────────────────────────────────────────────────
     document.getElementById('btn-age').addEventListener('click',   () => applyAge(1));
-    document.getElementById('btn-age10').addEventListener('click', () => applyAge(10));
+    // Keyboard shortcuts (see keydown handler below)
     document.getElementById('btn-passive').addEventListener('click', e =>
         setPassiveAging(!e.currentTarget.classList.contains('active')));
     document.getElementById('btn-rate-down').addEventListener('click', () => {
