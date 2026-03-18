@@ -1,6 +1,6 @@
 pub mod age;
-pub mod decode;
 pub mod decay;
+pub mod decode;
 pub mod encode;
 pub mod error;
 pub mod format;
@@ -9,13 +9,13 @@ pub mod prng;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
-pub use age::{age_by_erosion, age_by_consolidation, age_by_bleaching};
+pub use age::{age_by_bleaching, age_by_consolidation, age_by_erosion};
 #[allow(deprecated)]
-pub use age::{age_step, consolidation_step_with_pixel_ages, bleach_step};
-pub use decode::{DecodedFmrl, TileData, decode, patch_age_chunk};
-pub use encode::{FmrlImage, encode};
+pub use age::{age_step, bleach_step, consolidation_step_with_pixel_ages};
+pub use decode::{decode, patch_age_chunk, DecodedFmrl, TileData};
+pub use encode::{encode, FmrlImage};
 pub use error::FmrlError;
-pub use format::{ColorMode, Palette, AgeEntry};
+pub use format::{AgeEntry, ColorMode, Palette};
 
 use format::TILE_SIZE;
 
@@ -51,7 +51,6 @@ pub fn render(
     let w = decoded.ihdr.width as usize;
     let h = decoded.ihdr.height as usize;
     let decay_policy = decoded.ihdr.decay_policy;
-    let color_mode = decoded.ihdr.color_mode;
 
     let mut rgba = vec![0u8; w * h * 4];
 
@@ -67,7 +66,6 @@ pub fn render(
             &decoded.palette,
             now_ms,
             decay_policy,
-            color_mode,
         );
 
         // Blit tile pixels into output buffer

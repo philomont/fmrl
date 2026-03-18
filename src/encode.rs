@@ -1,25 +1,28 @@
 use std::io::Write;
 
-use flate2::Compression;
 use flate2::write::ZlibEncoder;
+use flate2::Compression;
 
-use crate::age::{age_by_erosion, age_by_consolidation, age_by_bleaching, consolidation_step_with_age};
+use crate::age::{
+    age_by_bleaching, age_by_consolidation, age_by_erosion, consolidation_step_with_age,
+};
 use crate::error::FmrlError;
 use crate::format::{
-    AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
-    AgeType, ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, write_chunk,
+    write_chunk, AgeType, IhdrChunk, Palette, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR,
+    CHUNK_META, MAGIC, TILE_SIZE,
 };
 
 /// Input image to encode
 pub struct FmrlImage {
     pub width: u16,
     pub height: u16,
-    pub color_mode: ColorMode,
     pub palette: Palette,
-    /// RGBA row-major pixels, width*height*4 bytes
+    /// RGB row-major pixels, width*height*3 bytes
+    /// Format: R = index × 16, G = contrast (0x00 for paper, 0xFF otherwise), B = age × 16
     pub pixels: Vec<u8>,
     pub decay_policy: u8,
-    pub age_type: AgeType,
+    /// Stack of aging algorithms to apply (up to 8)
+    pub age_types: Vec<AgeType>,
     /// Optional per-tile consolidation levels (for re-saving existing files)
     pub age_levels: Option<Vec<u8>>,
     /// Optional per-pixel ages (width*height bytes) for independent pixel aging
@@ -34,27 +37,10 @@ impl FmrlImage {
         FmrlImage {
             width,
             height,
-            color_mode: ColorMode::Indexed,
             palette: Palette::default(),
             pixels,
             decay_policy: 0,
-            age_type: AgeType::Erosion,
-            age_levels: None,
-            pixel_ages: None,
-            meta: None,
-        }
-    }
-
-    /// Create in RGBA mode (full color, no palette quantization)
-    pub fn new_rgba(width: u16, height: u16, pixels: Vec<u8>) -> Self {
-        FmrlImage {
-            width,
-            height,
-            color_mode: ColorMode::Rgba,
-            palette: Palette::default(), // Still used for paper color reference
-            pixels,
-            decay_policy: 0,
-            age_type: AgeType::Erosion,
+            age_types: vec![AgeType::Erosion],
             age_levels: None,
             pixel_ages: None,
             meta: None,
@@ -62,40 +48,28 @@ impl FmrlImage {
     }
 }
 
-/// Quantize an RGBA pixel to a palette index using alpha + grayscale mapping.
+/// Extract index and age from RGB pixel format.
 ///
-/// Storage format (v0.4+, theme-agnostic):
-/// Index 0 = paper (white, alpha=0) → renders as theme --paper
-/// Index 1 = ink (black [0,0,0], alpha=255) → renders as theme --ink
-/// Index 2-15 = grayscale steps → map to theme colors
-///
-/// Alpha is checked first to distinguish paper (transparent) from colors.
-fn quantize_pixel(r: u8, g: u8, b: u8, a: u8) -> u8 {
-    use crate::format::PALETTE_SIZE;
-
-    // Transparent pixels are paper (index 0)
-    if a < 128 {
-        return 0;
-    }
-
-    // For opaque pixels, use brightness for grayscale mapping
-    let brightness = (r as u16 + g as u16 + b as u16) / 3;
-
-    // Map brightness (0-255) to color indices 1-15
-    // Index 1 = black (brightness 0-16)
-    // Index 15 = almost-white (brightness 240-255)
-    let color_count = PALETTE_SIZE - 1; // 15 colors (indices 1-15)
-    let step = 256 / color_count as u16; // ~17 per step
-    let color_idx = ((brightness / step).min(color_count as u16 - 1) + 1) as u8;
-    color_idx
+/// Format: R = index × 16, G = contrast (ignored), B = age × 16
+/// Returns (index, age) where both are in range 0-15
+fn extract_index_and_age(r: u8, _g: u8, b: u8) -> (u8, u8) {
+    // Extract index from red channel (divide by 16, clamp to 0-15)
+    let index = (r >> 4).min(15);
+    // Extract age from blue channel (divide by 16, clamp to 0-15)
+    let age = (b >> 4).min(15);
+    (index, age)
 }
 
 /// Compress bytes with zlib (not raw DEFLATE).
 /// Uses best compression for smallest file size.
 pub fn zlib_compress(data: &[u8]) -> Result<Vec<u8>, FmrlError> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
-    encoder.write_all(data).map_err(|e| FmrlError::CompressionError(e.to_string()))?;
-    encoder.finish().map_err(|e| FmrlError::CompressionError(e.to_string()))
+    encoder
+        .write_all(data)
+        .map_err(|e| FmrlError::CompressionError(e.to_string()))?;
+    encoder
+        .finish()
+        .map_err(|e| FmrlError::CompressionError(e.to_string()))
 }
 
 /// Encode an `FmrlImage` to `.fmrl` bytes.
@@ -104,15 +78,21 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     let h = image.height as usize;
 
     if w == 0 || h == 0 {
-        return Err(FmrlError::MalformedChunk("image dimensions must be non-zero"));
+        return Err(FmrlError::MalformedChunk(
+            "image dimensions must be non-zero",
+        ));
     }
     if w > 65504 || h > 65504 {
-        return Err(FmrlError::MalformedChunk("image dimensions exceed maximum (65504)"));
+        return Err(FmrlError::MalformedChunk(
+            "image dimensions exceed maximum (65504)",
+        ));
     }
     if !w.is_multiple_of(TILE_SIZE) || !h.is_multiple_of(TILE_SIZE) {
-        return Err(FmrlError::MalformedChunk("dimensions must be multiples of TILE_SIZE"));
+        return Err(FmrlError::MalformedChunk(
+            "dimensions must be multiples of TILE_SIZE",
+        ));
     }
-    if image.pixels.len() != w * h * 4 {
+    if image.pixels.len() != w * h * 3 {
         return Err(FmrlError::MalformedChunk("pixel buffer size mismatch"));
     }
 
@@ -125,18 +105,17 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     out.extend_from_slice(&MAGIC);
 
     // IHDR chunk
-    let ihdr = IhdrChunk::new(image.width, image.height, image.color_mode, image.decay_policy, image.age_type);
+    let ihdr = IhdrChunk::new(
+        image.width,
+        image.height,
+        image.decay_policy,
+        &image.age_types,
+    );
     write_chunk(&mut out, CHUNK_IHDR, &ihdr.to_bytes());
 
-    // DATA chunk: mode-dependent
+    // DATA chunk: encode indexed mode
     // Get age levels from encoding (for consolidation tracking)
-    let age_levels = match image.color_mode {
-        ColorMode::Indexed => encode_indexed(&mut out, image, w, h, tiles_x, tiles_y)?,
-        ColorMode::Rgba => {
-            encode_rgba(&mut out, image, w, h, tiles_x, tiles_y)?;
-            vec![0u8; tiles_x * tiles_y] // RGBA doesn't use consolidation
-        }
-    };
+    let age_levels = encode_indexed(&mut out, image, w, h, tiles_x, tiles_y)?;
 
     // AGE chunk: compressed storage for all tiles
     // Format: [u16 entry_count] followed by compressed entries
@@ -153,11 +132,11 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
     }
 
     // Build AGE payload: count + compressed entries
-    // Each entry: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) + edge_damage(1) + reserved(2) = 20 bytes
+    // Each entry: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) + edge_damage(1) = 18 bytes
     let mut age_payload = Vec::new();
     age_payload.extend_from_slice(&(age_entries.len() as u16).to_le_bytes());
 
-    let mut age_data = Vec::with_capacity(age_entries.len() * 20);
+    let mut age_data = Vec::with_capacity(age_entries.len() * 18);
     for (tx, ty, level) in age_entries {
         age_data.extend_from_slice(&tx.to_le_bytes());
         age_data.extend_from_slice(&ty.to_le_bytes());
@@ -165,7 +144,6 @@ pub fn encode(image: &FmrlImage, now_ms: u64) -> Result<Vec<u8>, FmrlError> {
         age_data.push(level);
         age_data.extend_from_slice(&[tx as u8, (tx >> 8) as u8, ty as u8, (ty >> 8) as u8]); // noise_seed
         age_data.push(0); // edge_damage
-        age_data.extend_from_slice(&[0u8, 0]); // reserved
     }
 
     // Compress age data (empty for blank images = just zlib overhead)
@@ -197,64 +175,66 @@ fn encode_indexed(
     tiles_x: usize,
     tiles_y: usize,
 ) -> Result<Vec<u8>, FmrlError> {
-    // Step 1: quantize all pixels to palette indices
+    // Step 1: extract index and age from RGB pixels
     let mut indices = vec![0u8; w * h];
+    let mut pixel_ages = image.pixel_ages.clone().unwrap_or_else(|| vec![0u8; w * h]);
+
     for y in 0..h {
         for x in 0..w {
-            let base = (y * w + x) * 4;
+            let base = (y * w + x) * 3;
             let r = image.pixels[base];
             let g = image.pixels[base + 1];
             let b = image.pixels[base + 2];
-            let a = image.pixels[base + 3];
-            indices[y * w + x] = quantize_pixel(r, g, b, a);
+            let (index, age) = extract_index_and_age(r, g, b);
+            indices[y * w + x] = index;
+            pixel_ages[y * w + x] = age;
         }
     }
 
-    // Step 2: apply one aging step based on age_type
-    let mut age_levels = image.age_levels.clone().unwrap_or_else(|| vec![0u8; tiles_x * tiles_y]);
+    // Step 2: apply aging steps sequentially based on age_types stack
+    let mut age_levels = image
+        .age_levels
+        .clone()
+        .unwrap_or_else(|| vec![0u8; tiles_x * tiles_y]);
 
-    // Get or initialize per-pixel ages
-    let mut pixel_ages = image.pixel_ages.clone().unwrap_or_else(|| vec![0u8; w * h]);
-
-    indices = match image.age_type {
-        AgeType::Erosion => {
-            age_by_erosion(&indices, w, h)
-        }
-        AgeType::Consolidation => {
-            // Use per-pixel ages if available
-            if image.pixel_ages.is_some() {
-                let (new_indices, new_pixel_ages) = age_by_consolidation(
-                    &indices, &pixel_ages, w, h
-                );
-                // Compute tile-level ages from per-pixel ages (max age in tile)
-                for ty in 0..tiles_y {
-                    for tx in 0..tiles_x {
-                        let tile_idx = ty * tiles_x + tx;
-                        let tx0 = tx * TILE_SIZE;
-                        let ty0 = ty * TILE_SIZE;
-                        let mut max_age = 0u8;
-                        for y in 0..TILE_SIZE {
-                            for x in 0..TILE_SIZE {
-                                let age = new_pixel_ages[(ty0 + y) * w + (tx0 + x)];
-                                if age > max_age {
-                                    max_age = age;
+    for age_type in &image.age_types {
+        indices = match age_type {
+            AgeType::Erosion => age_by_erosion(&indices, w, h),
+            AgeType::Consolidation => {
+                // Use per-pixel ages if available
+                if image.pixel_ages.is_some() {
+                    let (new_indices, new_pixel_ages) =
+                        age_by_consolidation(&indices, &pixel_ages, w, h);
+                    // Compute tile-level ages from per-pixel ages (max age in tile)
+                    for ty in 0..tiles_y {
+                        for tx in 0..tiles_x {
+                            let tile_idx = ty * tiles_x + tx;
+                            let tx0 = tx * TILE_SIZE;
+                            let ty0 = ty * TILE_SIZE;
+                            let mut max_age = 0u8;
+                            for y in 0..TILE_SIZE {
+                                for x in 0..TILE_SIZE {
+                                    let age = new_pixel_ages[(ty0 + y) * w + (tx0 + x)];
+                                    if age > max_age {
+                                        max_age = age;
+                                    }
                                 }
                             }
+                            age_levels[tile_idx] = max_age;
                         }
-                        age_levels[tile_idx] = max_age;
                     }
+                    pixel_ages = new_pixel_ages;
+                    new_indices
+                } else {
+                    consolidation_step_with_age(&indices, w, h, &mut age_levels)
                 }
-                pixel_ages = new_pixel_ages;
-                new_indices
-            } else {
-                consolidation_step_with_age(&indices, w, h, &mut age_levels)
             }
-        }
-        AgeType::Bleach => {
-            // Convolutional bleach: 2x2 blocks with mixed/diagonal patterns become paper
-            age_by_bleaching(&indices, w, h)
-        }
-    };
+            AgeType::Bleach => {
+                // Convolutional bleach: 2x2 blocks with mixed/diagonal patterns become paper
+                age_by_bleaching(&indices, w, h)
+            }
+        };
+    }
 
     // DATA chunk: palette (48 bytes) + tiles
     let mut data_payload: Vec<u8> = Vec::new();
@@ -283,46 +263,6 @@ fn encode_indexed(
     Ok(age_levels)
 }
 
-/// Encode RGBA mode: paper color (3 bytes) + raw RGBA tiles
-fn encode_rgba(
-    out: &mut Vec<u8>,
-    image: &FmrlImage,
-    w: usize,
-    h: usize,
-    tiles_x: usize,
-    tiles_y: usize,
-) -> Result<(), FmrlError> {
-    // DATA chunk: paper color RGB (3 bytes) + tiles
-    let mut data_payload: Vec<u8> = Vec::new();
-    // Store paper color for fade target (index 0 is paper in v0.4+)
-    data_payload.extend_from_slice(&image.palette.0[0]);
-
-    // Per-tile: [u16 compressed_len LE][u8 flags][compressed RGBA data]
-    for ty in 0..tiles_y {
-        for tx in 0..tiles_x {
-            let tile_rgba = extract_tile_rgba(&image.pixels, w, h, tx, ty);
-            let compressed = zlib_compress(&tile_rgba)?;
-            let len = compressed.len() as u16;
-            data_payload.extend_from_slice(&len.to_le_bytes());
-            data_payload.push(0u8); // flags
-            data_payload.extend_from_slice(&compressed);
-        }
-    }
-    write_chunk(out, CHUNK_DATA, &data_payload);
-    Ok(())
-}
-
-fn extract_tile_rgba(pixels: &[u8], width: usize, _height: usize, tx: usize, ty: usize) -> Vec<u8> {
-    let mut tile = Vec::with_capacity(TILE_SIZE * TILE_SIZE * 4);
-    let x_start = tx * TILE_SIZE;
-    let y_start = ty * TILE_SIZE;
-    for y in y_start..y_start + TILE_SIZE {
-        let row_start = (y * width + x_start) * 4;
-        tile.extend_from_slice(&pixels[row_start..row_start + TILE_SIZE * 4]);
-    }
-    tile
-}
-
 fn extract_tile_indices(indices: &[u8], width: usize, tx: usize, ty: usize) -> Vec<u8> {
     let mut tile = Vec::with_capacity(TILE_SIZE * TILE_SIZE);
     let x_start = tx * TILE_SIZE;
@@ -349,7 +289,9 @@ fn extract_tile_ages(ages: &[u8], width: usize, tx: usize, ty: usize) -> Vec<u8>
 /// High nibble (4 bits) = index (0-15), low nibble (4 bits) = age (0-15).
 fn pack_tile_data(indices: &[u8], ages: &[u8]) -> Vec<u8> {
     assert_eq!(indices.len(), ages.len());
-    indices.iter().zip(ages.iter())
+    indices
+        .iter()
+        .zip(ages.iter())
         .map(|(&idx, &age)| (idx << 4) | (age & 0x0F))
         .collect()
 }

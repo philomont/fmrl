@@ -1,24 +1,25 @@
 use fmrl::age_by_erosion;
-use fmrl::encode::{FmrlImage, encode};
+use fmrl::encode::{encode, FmrlImage};
 use fmrl::format::Palette;
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-fn indices_to_rgba(indices: &[u8], palette: &Palette) -> Vec<u8> {
-    let mut rgba = vec![0u8; indices.len() * 4];
+/// Convert palette indices to RGB format for encoding
+/// Format: R = index × 16, G = contrast (0x00 for paper, 0xFF otherwise), B = age × 16
+fn indices_to_rgb(indices: &[u8]) -> Vec<u8> {
+    let mut rgb = vec![0u8; indices.len() * 3];
     for (i, &idx) in indices.iter().enumerate() {
-        let [r, g, b] = palette.0[idx as usize];
-        rgba[i * 4]     = r;
-        rgba[i * 4 + 1] = g;
-        rgba[i * 4 + 2] = b;
-        rgba[i * 4 + 3] = 255;
+        let base = i * 3;
+        rgb[base] = idx << 4; // R = index × 16
+        rgb[base + 1] = if idx == 0 { 0x00 } else { 0xFF }; // G = contrast
+        rgb[base + 2] = 0; // B = age × 0 (no aging yet)
     }
-    rgba
+    rgb
 }
 
 fn encoded_size(indices: &[u8], width: usize, height: usize, palette: &Palette) -> usize {
-    let rgba = indices_to_rgba(indices, palette);
-    let mut img = FmrlImage::new(width as u16, height as u16, rgba);
+    let rgb = indices_to_rgb(indices);
+    let mut img = FmrlImage::new(width as u16, height as u16, rgb);
     img.palette = palette.clone();
     encode(&img, 0).expect("encode failed").len()
 }
@@ -115,7 +116,7 @@ fn aging_reduces_file_size_over_many_steps() {
         }
     }
 
-    let initial_size = encoded_size(&indices, w, h, &palette);
+    let _initial_size = encoded_size(&indices, w, h, &palette);
 
     for _ in 0..30 {
         indices = age_by_erosion(&indices, w, h);
@@ -143,8 +144,11 @@ fn checkerboard_converges_to_all_paper() {
         // Check for all paper (index 0 in v0.4+)
         if indices.iter().all(|&p| p == 0) {
             let size = encoded_size(&indices, w, h, &palette);
-            let ap   = encoded_size(&all_paper(w, h), w, h, &palette);
-            assert_eq!(size, ap, "checkerboard converged at step {step} but size wrong");
+            let ap = encoded_size(&all_paper(w, h), w, h, &palette);
+            assert_eq!(
+                size, ap,
+                "checkerboard converged at step {step} but size wrong"
+            );
             return;
         }
     }

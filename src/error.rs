@@ -3,7 +3,11 @@ use std::fmt;
 #[derive(Debug)]
 pub enum FmrlError {
     InvalidMagic([u8; 4]),
-    InvalidChunkCrc { chunk: [u8; 4], expected: u32, got: u32 },
+    InvalidChunkCrc {
+        chunk: [u8; 4],
+        expected: u32,
+        got: u32,
+    },
     UnexpectedEof,
     MalformedChunk(&'static str),
     CompressionError(String),
@@ -15,7 +19,11 @@ impl fmt::Display for FmrlError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FmrlError::InvalidMagic(m) => write!(f, "invalid magic bytes: {:?}", m),
-            FmrlError::InvalidChunkCrc { chunk, expected, got } => {
+            FmrlError::InvalidChunkCrc {
+                chunk,
+                expected,
+                got,
+            } => {
                 write!(
                     f,
                     "CRC mismatch in chunk '{}': expected {:#010x}, got {:#010x}",

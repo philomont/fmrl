@@ -211,9 +211,7 @@ pub fn age_by_consolidation(
             let y_end = (y + 2).min(height);
             let x_end = (x + 2).min(width);
 
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
-            );
+            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
 
             // Consolidate if any pixel is age 0 (youngest drives consolidation)
             if min_age == 0 {
@@ -229,9 +227,7 @@ pub fn age_by_consolidation(
             let y_end = (y + 4).min(height);
             let x_end = (x + 4).min(width);
 
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
-            );
+            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
 
             if min_age == 1 {
                 should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] = true;
@@ -245,9 +241,7 @@ pub fn age_by_consolidation(
             let y_end = (y + 8).min(height);
             let x_end = (x + 8).min(width);
 
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
-            );
+            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
 
             if min_age == 2 {
                 should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] = true;
@@ -261,9 +255,7 @@ pub fn age_by_consolidation(
             let y_end = (y + 16).min(height);
             let x_end = (x + 16).min(width);
 
-            let min_age = min_age_in_region(
-                &new_ages, width, x, y, x_end - x, y_end - y
-            );
+            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
 
             if min_age == 3 {
                 should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] = true;
@@ -282,10 +274,7 @@ pub fn age_by_consolidation(
                 let y_end = (y + 16).min(height);
                 let x_end = (x + 16).min(width);
 
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
+                let min_idx = min_index_in_region(&result, width, x, y, x_end - x, y_end - y);
 
                 for by in y..y_end {
                     for bx in x..x_end {
@@ -305,10 +294,7 @@ pub fn age_by_consolidation(
                 let y_end = (y + 8).min(height);
                 let x_end = (x + 8).min(width);
 
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
+                let min_idx = min_index_in_region(&result, width, x, y, x_end - x, y_end - y);
 
                 for by in y..y_end {
                     for bx in x..x_end {
@@ -328,10 +314,7 @@ pub fn age_by_consolidation(
                 let y_end = (y + 4).min(height);
                 let x_end = (x + 4).min(width);
 
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
+                let min_idx = min_index_in_region(&result, width, x, y, x_end - x, y_end - y);
 
                 for by in y..y_end {
                     for bx in x..x_end {
@@ -351,10 +334,7 @@ pub fn age_by_consolidation(
                 let y_end = (y + 2).min(height);
                 let x_end = (x + 2).min(width);
 
-                let min_idx = min_index_in_region(
-                    &result, width, x, y,
-                    x_end - x, y_end - y
-                );
+                let min_idx = min_index_in_region(&result, width, x, y, x_end - x, y_end - y);
 
                 for by in y..y_end {
                     for bx in x..x_end {
@@ -448,12 +428,7 @@ pub fn consolidation_step_with_age(
     }
 
     // Apply consolidation with per-pixel ages
-    let (result, new_per_pixel_age) = age_by_consolidation(
-        indices,
-        &per_pixel_age,
-        width,
-        height,
-    );
+    let (result, new_per_pixel_age) = age_by_consolidation(indices, &per_pixel_age, width, height);
 
     // Compute new tile ages from per-pixel ages
     for ty in 0..tiles_y {
@@ -570,7 +545,10 @@ fn is_block_bleachable(block: &[u8; 4]) -> bool {
     }
 
     // Count how many different indices are present
-    let unique_indices: Vec<u8> = (0..16).filter(|&i| counts[i] > 0).map(|i| i as u8).collect();
+    let unique_indices: Vec<u8> = (0..16)
+        .filter(|&i| counts[i] > 0)
+        .map(|i| i as u8)
+        .collect();
     let unique_count = unique_indices.len();
 
     // Case 1: 3 or 4 different indices -> bleach (information rich/noisy)
@@ -612,4 +590,3 @@ fn is_block_bleachable(block: &[u8; 4]) -> bool {
 pub fn bleach_step(indices: &[u8], width: usize, height: usize) -> Vec<u8> {
     age_by_bleaching(indices, width, height)
 }
-

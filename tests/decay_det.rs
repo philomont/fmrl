@@ -7,12 +7,15 @@ const LATER_MS: u64 = NOW_MS + 15 * 24 * 3600 * 1000;
 fn test_image() -> FmrlImage {
     let palette = Palette::default();
     // Mix of ink and paper pixels for interesting decay behavior
-    let mut pixels = Vec::with_capacity(128 * 128 * 4);
+    // RGB format: R = index × 16, G = contrast (0x00 for paper, 0xFF otherwise), B = age × 16
+    let mut pixels = Vec::with_capacity(128 * 128 * 3);
     for y in 0..128usize {
         for x in 0..128usize {
-            let idx = ((x / 8 + y / 8) % 4) as usize;
-            let [r, g, b] = palette.0[idx];
-            pixels.extend_from_slice(&[r, g, b, 255]);
+            let idx = ((x / 8 + y / 8) % 4) as u8;
+            // R = index × 16, G = contrast, B = 0
+            pixels.push(idx << 4); // R
+            pixels.push(if idx == 0 { 0x00 } else { 0xFF }); // G
+            pixels.push(0); // B
         }
     }
     let mut image = FmrlImage::new(128, 128, pixels);
@@ -34,7 +37,10 @@ fn same_age_bytes_produce_identical_output() {
     let mut file2 = encoded.clone();
     let rgba2 = render(&mut decoded2, LATER_MS, &mut file2).expect("render 2 failed");
 
-    assert_eq!(rgba1, rgba2, "renders must be deterministic given same input");
+    assert_eq!(
+        rgba1, rgba2,
+        "renders must be deterministic given same input"
+    );
 }
 
 #[test]
@@ -49,9 +55,13 @@ fn different_time_produces_different_output() {
     let mut decoded2 = decode(&encoded).expect("decode failed");
     let mut file2 = encoded.clone();
     // 29 days later: should be significantly decayed
-    let rgba_late = render(&mut decoded2, NOW_MS + 29 * 24 * 3600 * 1000, &mut file2).expect("render failed");
+    let rgba_late =
+        render(&mut decoded2, NOW_MS + 29 * 24 * 3600 * 1000, &mut file2).expect("render failed");
 
-    assert_ne!(rgba_early, rgba_late, "different times must produce different output");
+    assert_ne!(
+        rgba_early, rgba_late,
+        "different times must produce different output"
+    );
 }
 
 #[test]

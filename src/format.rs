@@ -13,30 +13,33 @@ pub const CHUNK_META: &[u8; 4] = b"META";
 pub const CHUNK_IEND: &[u8; 4] = b"IEND";
 
 // Color types (PNG-compatible where applicable)
-pub const COLOR_TYPE_INDEXED: u8 = 3; // Palette-based, 4-color
-pub const COLOR_TYPE_RGBA: u8 = 6;    // Full RGBA (8-bit per channel)
+pub const COLOR_TYPE_INDEXED: u8 = 3; // Palette-based, 16-color
 
 // Age types for different aging algorithms
 // All types must reduce information (file size decreases with each application)
-pub const AGE_TYPE_EROSION: u8 = 0;        // Morphological erosion (default)
+pub const AGE_TYPE_EROSION: u8 = 0; // Morphological erosion (default)
 pub const AGE_TYPE_CONSOLIDATION: u8 = 1; // Neighbor consolidation: 32x32 → 16x16
-pub const AGE_TYPE_BLEACH: u8 = 2;       // Convolutional bleach: mixed/diagonal 2x2 → paper
+pub const AGE_TYPE_BLEACH: u8 = 2; // Convolutional bleach: mixed/diagonal 2x2 → paper
+                                   // 3-7 = Reserved for future built-in algorithms
+                                   // 8-254 = Available for experimental algorithms
+pub const AGE_TYPE_UNUSED: u8 = 255; // Sentinel value for unused slot
 
-/// IHDR payload length: width(2) + height(2) + bit_depth(1) + color_type(1) +
-/// compression(1) + filter(1) + interlace(1) + decay_policy(1) + age_type(1) = 11 bytes
-pub const IHDR_LEN: usize = 11;
+/// IHDR base length: width(2) + height(2) + bit_depth(1) + color_type(1) +
+/// compression(1) + filter(1) + interlace(1) + decay_policy(1) = 9 bytes
+pub const IHDR_BASE_LEN: usize = 9;
+
+/// Maximum number of aging algorithms in stack
+pub const MAX_AGE_TYPES: usize = 8;
 
 /// AGE entry: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) +
-/// edge_damage(1) + reserved(2) + _pad(2) = 22 bytes
-pub const AGE_ENTRY_BYTES: usize = 22;
+/// edge_damage(1) = 18 bytes (removed reserved field for smaller files)
+pub const AGE_ENTRY_BYTES: usize = 18;
 
 /// Color mode for FMRL images
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ColorMode {
-    /// 4-color indexed palette (classic FMRL)
+    /// 16-color indexed palette (only mode supported)
     Indexed,
-    /// Full 8-bit RGBA per pixel
-    Rgba,
 }
 
 impl ColorMode {
@@ -44,7 +47,6 @@ impl ColorMode {
     pub fn as_u8(self) -> u8 {
         match self {
             ColorMode::Indexed => COLOR_TYPE_INDEXED,
-            ColorMode::Rgba => COLOR_TYPE_RGBA,
         }
     }
 
@@ -52,7 +54,6 @@ impl ColorMode {
     pub fn from_u8(value: u8) -> Option<Self> {
         match value {
             COLOR_TYPE_INDEXED => Some(ColorMode::Indexed),
-            COLOR_TYPE_RGBA => Some(ColorMode::Rgba),
             _ => None,
         }
     }
@@ -102,51 +103,79 @@ pub struct IhdrChunk {
     pub filter: u8,
     pub interlace: u8,
     pub decay_policy: u8,
-    pub age_type: AgeType,
+    /// Stack of aging algorithms to apply (1-8 algorithms)
+    pub age_types: Vec<AgeType>,
 }
 
 impl IhdrChunk {
-    pub fn new(width: u16, height: u16, color_mode: ColorMode, decay_policy: u8, age_type: AgeType) -> Self {
+    /// Create a new IHDR chunk with algorithm stack
+    pub fn new(width: u16, height: u16, decay_policy: u8, age_types: &[AgeType]) -> Self {
         IhdrChunk {
             width,
             height,
             bit_depth: 8,
-            color_mode,
+            color_mode: ColorMode::Indexed,
             compression: 0,
             filter: 0,
             interlace: 0,
             decay_policy,
-            age_type,
+            age_types: age_types.to_vec(),
         }
     }
 
-    /// Create with default indexed color mode (backward compatible)
-    pub fn new_indexed(width: u16, height: u16, decay_policy: u8) -> Self {
-        Self::new(width, height, ColorMode::Indexed, decay_policy, AgeType::Erosion)
+    /// Calculate the serialized length of this IHDR chunk
+    pub fn serialized_len(&self) -> usize {
+        IHDR_BASE_LEN + 1 + self.age_types.len() // base + count + age_types
     }
 
-    pub fn to_bytes(&self) -> [u8; IHDR_LEN] {
-        let mut buf = [0u8; IHDR_LEN];
-        buf[0..2].copy_from_slice(&self.width.to_be_bytes());
-        buf[2..4].copy_from_slice(&self.height.to_be_bytes());
-        buf[4] = self.bit_depth;
-        buf[5] = self.color_mode.as_u8();
-        buf[6] = self.compression;
-        buf[7] = self.filter;
-        buf[8] = self.interlace;
-        buf[9] = self.decay_policy;
-        buf[10] = self.age_type.as_u8();
+    /// Serialize to bytes (variable length based on age_types count)
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let age_count = self.age_types.len().min(MAX_AGE_TYPES);
+        let mut buf = Vec::with_capacity(IHDR_BASE_LEN + 1 + age_count);
+
+        buf.extend_from_slice(&self.width.to_be_bytes());
+        buf.extend_from_slice(&self.height.to_be_bytes());
+        buf.push(self.bit_depth);
+        buf.push(self.color_mode.as_u8());
+        buf.push(self.compression);
+        buf.push(self.filter);
+        buf.push(self.interlace);
+        buf.push(self.decay_policy);
+        buf.push(age_count as u8);
+
+        for age_type in &self.age_types[..age_count] {
+            buf.push(age_type.as_u8());
+        }
+
         buf
     }
 
+    /// Parse from bytes (variable length)
     pub fn from_bytes(b: &[u8]) -> Result<Self, FmrlError> {
-        if b.len() < IHDR_LEN {
+        if b.len() < IHDR_BASE_LEN + 1 {
             return Err(FmrlError::MalformedChunk("IHDR too short"));
         }
-        let color_mode = ColorMode::from_u8(b[5])
-            .ok_or(FmrlError::MalformedChunk("unsupported color type"))?;
-        let age_type = AgeType::from_u8(b[10])
-            .ok_or(FmrlError::MalformedChunk("unsupported age type"))?;
+
+        let color_mode =
+            ColorMode::from_u8(b[5]).ok_or(FmrlError::MalformedChunk("unsupported color type"))?;
+        let decay_policy = b[9];
+        let age_count = b[10] as usize;
+
+        if age_count == 0 || age_count > MAX_AGE_TYPES {
+            return Err(FmrlError::MalformedChunk("invalid age_type count"));
+        }
+
+        if b.len() < IHDR_BASE_LEN + 1 + age_count {
+            return Err(FmrlError::MalformedChunk("IHDR too short for age_types"));
+        }
+
+        let mut age_types = Vec::with_capacity(age_count);
+        for i in 0..age_count {
+            let age_type = AgeType::from_u8(b[11 + i])
+                .ok_or(FmrlError::MalformedChunk("unsupported age type"))?;
+            age_types.push(age_type);
+        }
+
         Ok(IhdrChunk {
             width: u16::from_be_bytes([b[0], b[1]]),
             height: u16::from_be_bytes([b[2], b[3]]),
@@ -155,8 +184,8 @@ impl IhdrChunk {
             compression: b[6],
             filter: b[7],
             interlace: b[8],
-            decay_policy: b[9],
-            age_type,
+            decay_policy,
+            age_types,
         })
     }
 }
@@ -169,7 +198,6 @@ pub struct AgeEntry {
     pub fade_level: u8,
     pub noise_seed: [u8; 4],
     pub edge_damage: u8,
-    pub reserved: u16,
 }
 
 impl AgeEntry {
@@ -181,8 +209,6 @@ impl AgeEntry {
         buf[12] = self.fade_level;
         buf[13..17].copy_from_slice(&self.noise_seed);
         buf[17] = self.edge_damage;
-        buf[18..20].copy_from_slice(&self.reserved.to_le_bytes());
-        // bytes 20..22 are padding, stay zero
         buf
     }
 
@@ -199,7 +225,6 @@ impl AgeEntry {
             fade_level: b[12],
             noise_seed,
             edge_damage: b[17],
-            reserved: u16::from_le_bytes([b[18], b[19]]),
         })
     }
 }
@@ -226,13 +251,12 @@ impl Default for Palette {
         // Color indices 1-15: black to almost-white
         // Index 1 = black (0), Index 15 = light gray (238)
         for i in 1..PALETTE_SIZE {
-            let gray = (((i - 1) * 17)).min(255) as u8;
+            let gray = ((i - 1) * 17).min(255) as u8;
             colors[i] = [gray, gray, gray];
         }
         Palette(colors)
     }
 }
-
 
 /// Zero-copy borrowed chunk view
 pub struct ChunkRef<'a> {
@@ -247,7 +271,12 @@ pub fn parse_chunk<'a>(data: &'a [u8], offset: usize) -> Result<(ChunkRef<'a>, u
     if offset + 8 > data.len() {
         return Err(FmrlError::UnexpectedEof);
     }
-    let length = u32::from_be_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as usize;
+    let length = u32::from_be_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ]) as usize;
     let name_start = offset + 4;
     let data_start = offset + 8;
     let crc_start = data_start + length;
@@ -257,12 +286,16 @@ pub fn parse_chunk<'a>(data: &'a [u8], offset: usize) -> Result<(ChunkRef<'a>, u
         return Err(FmrlError::UnexpectedEof);
     }
 
-    let name: &[u8; 4] = data[name_start..name_start+4].try_into()
+    let name: &[u8; 4] = data[name_start..name_start + 4]
+        .try_into()
         .map_err(|_| FmrlError::MalformedChunk("chunk name length"))?;
     let chunk_data = &data[data_start..crc_start];
 
     let stored_crc = u32::from_be_bytes([
-        data[crc_start], data[crc_start+1], data[crc_start+2], data[crc_start+3],
+        data[crc_start],
+        data[crc_start + 1],
+        data[crc_start + 2],
+        data[crc_start + 3],
     ]);
 
     // Verify CRC over name ++ data
@@ -279,7 +312,13 @@ pub fn parse_chunk<'a>(data: &'a [u8], offset: usize) -> Result<(ChunkRef<'a>, u
         });
     }
 
-    Ok((ChunkRef { name, data: chunk_data }, next_offset))
+    Ok((
+        ChunkRef {
+            name,
+            data: chunk_data,
+        },
+        next_offset,
+    ))
 }
 
 /// Compute CRC over name ++ data (per PNG convention).
@@ -299,4 +338,3 @@ pub fn write_chunk(out: &mut Vec<u8>, name: &[u8; 4], data: &[u8]) {
     let crc = compute_crc(name, data);
     out.extend_from_slice(&crc.to_be_bytes());
 }
-
