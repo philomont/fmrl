@@ -42,11 +42,12 @@
     </div>
     <div class="bar-sep"></div>
     <div class="bar-group">
-      <label class="bar-label">Aging Technique:</label>
-      <select id="age-type-select" title="Aging algorithm">
-        <option value="0">Erosion</option>
-        <option value="1">Consolidation</option>
-        <option value="2">Bleach</option>
+      <label class="bar-label">Aging Stack:</label>
+      <select id="age-stack-select" title="Aging algorithm stack">
+        <option value="[0]">0. Erosion</option>
+        <option value="[1]">1. Consolidation</option>
+        <option value="[2]">2. Bleach</option>
+        <option value="custom">Custom...</option>
       </select>
     </div>
     <div class="bar-sep"></div>
@@ -84,6 +85,29 @@
     <button id="tray-toggle" class="bar-icon-btn" title="About FMRL">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
     </button>
+  </div>
+
+  <!-- ── Custom Stack Modal ──────────────────────────────────────────────── -->
+  <div id="stack-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Custom Aging Stack</h3>
+      <p>Enter up to 8 aging steps (0=Erosion, 1=Consolidation, 2=Bleach)</p>
+      <div class="stack-inputs">
+        <input type="text" maxlength="1" pattern="[0-2]" placeholder="_" data-idx="0">
+        <input type="text" maxlength="1" pattern="[0-2]" placeholder="_" data-idx="1">
+        <input type="text" maxlength="1" pattern="[0-2]" placeholder="_" data-idx="2">
+        <input type="text" maxlength="1" pattern="[0-2]" placeholder="_" data-idx="3">
+        <input type="text" maxlength="1" pattern="[0-2]" placeholder="_" data-idx="4">
+        <input type="text" maxlength="1" pattern="[0-2]" placeholder="_" data-idx="5">
+        <input type="text" maxlength="1" pattern="[0-2]" placeholder="_" data-idx="6">
+        <input type="text" maxlength="1" pattern="[0-2]" placeholder="_" data-idx="7">
+      </div>
+      <div class="stack-preview" id="stack-preview"></div>
+      <div class="modal-buttons">
+        <button id="btn-add-stack">Add</button>
+        <button id="btn-cancel-stack">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <!-- ── Tray backdrop ───────────────────────────────────────────────────── -->

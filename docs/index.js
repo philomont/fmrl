@@ -1,7 +1,10 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, bleach_step_indices, encode_rgba_with_pixel_ages } from './pkg/fmrl.js?v=10';
+import init, { FmrlView, encode_rgb, encode_rgb_with_levels, decode_to_rgb, consolidation_step_with_ages, bleach_step_indices } from './pkg/fmrl.js?v=11';
 
-// Age type: 0 = erosion (default), 1 = consolidation
-let currentAgeType = 0;
+// Age stack: array of age types (0=erosion, 1=consolidation, 2=bleach)
+let currentAgeStack = [0];
+
+// Custom stacks persisted in localStorage
+let customStacks = [];
 
 // Track age levels (consolidation levels) per tile - persists through encode/decode
 let currentAgeLevels = null;
@@ -485,60 +488,28 @@ function applyAge(n = 1) {
             if (textBuffer) _blitText(textBuffer);
         }
 
-        // For consolidation mode (age type 1), use per-pixel ages directly
-        if (currentAgeType === 1) {
-            // Initialize pixel ages if needed
-            if (!currentPixelAges || currentPixelAges.length !== W * H) {
-                currentPixelAges = new Uint8Array(W * H);
-            }
+        // Convert current indices to RGB format for encoding
+        // RGB: R=index×16, G=contrast, B=age×16
+        const rgb = indicesToRgb(indices);
 
-            for (let i = 0; i < n; i++) {
-                // Apply one consolidation step with per-pixel ages
-                // Returns concatenated [indices, pixel_ages]
-                const result = consolidation_step_with_ages(indices, currentPixelAges, W, H);
-                const pixelCount = W * H;
+        // Encode with current age stack and existing age levels
+        const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
+        const bytes = encode_rgb_with_levels(
+            rgb, 
+            W, 
+            H, 
+            new Uint8Array(currentAgeStack), 
+            ageLevelsArray
+        );
 
-                // Extract updated indices and pixel ages
-                indices = new Uint8Array(result.slice(0, pixelCount));
-                currentPixelAges = new Uint8Array(result.slice(pixelCount, pixelCount * 2));
-            }
+        // Read age levels back from the encoded file
+        const view = FmrlView.new(bytes);
+        currentAgeLevels = view.age_levels();
+        view.free();
 
-            // Update tile-level age levels from per-pixel ages (max age per tile)
-            updateTileAgeLevelsFromPixelAges();
-
-            render();
-            updateMetric();
-            return;
-        }
-
-        // For bleach mode (age type 2), apply 2x2 convolutional bleach
-        if (currentAgeType === 2) {
-            for (let i = 0; i < n; i++) {
-                indices = new Uint8Array(bleach_step_indices(indices, W, H));
-            }
-            render();
-            updateMetric();
-            return;
-        }
-
-        // For erosion mode (age type 0), use the encode/decode cycle
-        // Age levels persist through the cycle
-        for (let i = 0; i < n; i++) {
-            // Convert current indices to RGBA for encoding
-            const rgba = indicesToGrayscaleRgba(indices);
-
-            // Encode with current age type and existing age levels
-            const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
-            const bytes = encode_rgba_with_age_and_levels(rgba, W, H, currentAgeType, ageLevelsArray);
-
-            // Read age levels back from the encoded file
-            const view = FmrlView.new(bytes);
-            currentAgeLevels = view.age_levels();
-            view.free();
-
-            // Decode back to indices (display only)
-            indices = new Uint8Array(decode_to_indices(bytes));
-        }
+        // Decode back to RGB and extract indices
+        const decodedRgb = new Uint8Array(decode_to_rgb(bytes));
+        extractFromRgb(decodedRgb);
 
         render();
         updateMetric();
@@ -614,19 +585,18 @@ function computeBlankSize() {
     // Use constant PALETTE for consistent blank size across themes
     // This ensures the base file size is always computed the same way
     // regardless of which theme is currently selected
-    const rgba = new Uint8Array(W * H * 4);
+    // RGB format: R=index×16, G=contrast, B=age×16
+    const rgb = new Uint8Array(W * H * 3);
     for (let i = 0; i < W * H; i++) {
-        const [r, g, b] = PALETTE[0]; // paper color (index 0)
-        rgba[i * 4] = r;
-        rgba[i * 4 + 1] = g;
-        rgba[i * 4 + 2] = b;
-        rgba[i * 4 + 3] = 255;
+        rgb[i * 3] = 0;        // R = 0 (paper index)
+        rgb[i * 3 + 1] = 0x00; // G = 0x00 (paper contrast)
+        rgb[i * 3 + 2] = 0;    // B = 0 (age 0)
     }
-    blankSize = encode_rgba(rgba, W, H).length;
+    blankSize = encode_rgb(rgb, W, H, new Uint8Array([0])).length;
 }
 
 function updateMetric() {
-    const size = encode_rgba(indicesToRgba(), W, H).length;
+    const size = encode_rgb(indicesToRgb(), W, H, new Uint8Array(currentAgeStack)).length;
     const el = document.getElementById('size-metric');
 
     // Compute blank size if not already done (first time)
@@ -847,6 +817,32 @@ const STORAGE_PALETTE = [
 /// Convert indices to grayscale RGBA for encoding (theme-independent)
 /// v0.4+ format: Maps indices to brightness values that quantize back to same index.
 /// The codec quantizes: brightness 0-16→1, 17-33→2, ..., 240-255→15, alpha<128→0
+/// Convert indices to RGB format for encoding
+/// RGB: R=index×16, G=contrast (0x00 for paper, 0xFF otherwise), B=age×16
+function indicesToRgb(src = indices) {
+    const rgb = new Uint8Array(W * H * 3);
+    for (let i = 0; i < W * H; i++) {
+        const idx = src[i];
+        const age = currentPixelAges ? currentPixelAges[i] : 0;
+        rgb[i * 3] = idx << 4;                          // R = index × 16
+        rgb[i * 3 + 1] = idx === 0 ? 0x00 : 0xFF;       // G = contrast
+        rgb[i * 3 + 2] = age << 4;                      // B = age × 16
+    }
+    return rgb;
+}
+
+/// Extract indices and ages from RGB format
+/// RGB: R=index×16, G=contrast, B=age×16
+function extractFromRgb(rgb) {
+    for (let i = 0; i < indices.length; i++) {
+        indices[i] = rgb[i * 3] >> 4;
+        if (currentPixelAges) {
+            currentPixelAges[i] = rgb[i * 3 + 2] >> 4;
+        }
+    }
+}
+
+/// DEPRECATED: Use indicesToRgb instead
 /// To get a specific index, we use the MIN brightness value for that index's range.
 function indicesToGrayscaleRgba(src = indices) {
     const rgba = new Uint8Array(W * H * 4);
@@ -897,19 +893,19 @@ function indicesToGrayscaleRgba(src = indices) {
 
 function saveFmrl() {
     try {
-        // Encode current canvas state using grayscale (theme-independent storage)
-        // Use current age type (0=erosion, 1=fade, 2=noise)
-        let bytes;
-        const rgba = indicesToGrayscaleRgba(indices);
+        // Encode current canvas state using RGB format
+        // RGB: R=index×16, G=contrast, B=age×16
+        const rgb = indicesToRgb(indices);
         const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
 
-        if (currentAgeType === 1 && currentPixelAges && currentPixelAges.length > 0) {
-            // For consolidation mode with per-pixel ages, use the new encoder
-            bytes = encode_rgba_with_pixel_ages(rgba, W, H, currentAgeType, ageLevelsArray, currentPixelAges);
-        } else {
-            // For other modes or when no pixel ages, use standard encoder
-            bytes = encode_rgba_with_age_and_levels(rgba, W, H, currentAgeType, ageLevelsArray);
-        }
+        // Encode with current age stack
+        const bytes = encode_rgb_with_levels(
+            rgb, 
+            W, 
+            H, 
+            new Uint8Array(currentAgeStack), 
+            ageLevelsArray
+        );
 
         // Save FMRL file
         const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
@@ -988,15 +984,20 @@ function loadFmrl(arrayBuffer) {
         const peek  = FmrlView.new(bytes);
         const fileW = peek.width(), fileH = peek.height();
 
-        // Read age levels and age type from the file
+        // Read age levels and age stack from the file
         currentAgeLevels = peek.age_levels();
-        currentAgeType = peek.age_type();
+        const ageTypesStr = peek.age_types(); // Returns comma-separated string like "0,1,2"
+        const fileStack = ageTypesStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
 
-        // Update the UI to match the file's age type
-        const ageSelect = document.getElementById('age-type-select');
-        if (ageSelect) {
-            ageSelect.value = currentAgeType.toString();
+        // Add file's stack to dropdown if not exists
+        const stackKey = JSON.stringify(fileStack);
+        if (!stackExistsInDropdown(stackKey)) {
+            addStackToDropdown(fileStack);
         }
+
+        // Update current stack and UI
+        currentAgeStack = fileStack;
+        updateDropdownSelection(stackKey);
 
         peek.free();
 
@@ -1005,30 +1006,26 @@ function loadFmrl(arrayBuffer) {
         canvas.height = H;
         textHelper = null;
 
-        // Decode without additional aging (file already contains aged data)
-        indices  = new Uint8Array(decode_to_indices(bytes));
-
-        // Initialize per-pixel ages from tile ages
-        // Each pixel in a tile gets the tile's age
-        if (currentAgeType === 1 && currentAgeLevels) {
-            const tilesX = W / TILE_SIZE;
-            const tilesY = H / TILE_SIZE;
-            currentPixelAges = new Uint8Array(W * H);
-            for (let ty = 0; ty < tilesY; ty++) {
-                for (let tx = 0; tx < tilesX; tx++) {
-                    const tileAge = currentAgeLevels[ty * tilesX + tx] || 0;
-                    const y0 = ty * TILE_SIZE;
-                    const x0 = tx * TILE_SIZE;
-                    for (let y = 0; y < TILE_SIZE; y++) {
-                        for (let x = 0; x < TILE_SIZE; x++) {
-                            currentPixelAges[(y0 + y) * W + (x0 + x)] = tileAge;
-                        }
+        // Initialize per-pixel ages
+        const tilesX = W / TILE_SIZE;
+        const tilesY = H / TILE_SIZE;
+        currentPixelAges = new Uint8Array(W * H);
+        for (let ty = 0; ty < tilesY; ty++) {
+            for (let tx = 0; tx < tilesX; tx++) {
+                const tileAge = currentAgeLevels[ty * tilesX + tx] || 0;
+                const y0 = ty * TILE_SIZE;
+                const x0 = tx * TILE_SIZE;
+                for (let y = 0; y < TILE_SIZE; y++) {
+                    for (let x = 0; x < TILE_SIZE; x++) {
+                        currentPixelAges[(y0 + y) * W + (x0 + x)] = tileAge;
                     }
                 }
             }
-        } else {
-            currentPixelAges = null;
         }
+
+        // Decode to RGB and extract indices
+        const rgb = new Uint8Array(decode_to_rgb(bytes));
+        extractFromRgb(rgb);
 
         render();
         lastMetricSize = 0;
@@ -1049,6 +1046,77 @@ function closeTray() {
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
+
+// ── Custom Stack Modal Functions ───────────────────────────────────────────
+
+function loadCustomStacks() {
+    const saved = localStorage.getItem('fmrl-custom-stacks');
+    if (saved) {
+        customStacks = JSON.parse(saved);
+        customStacks.forEach(stack => addStackToDropdown(stack));
+    }
+}
+
+function saveCustomStacks() {
+    localStorage.setItem('fmrl-custom-stacks', JSON.stringify(customStacks));
+}
+
+function addStackToDropdown(stack) {
+    const select = document.getElementById('age-stack-select');
+    const shorthand = stack.map(s => s === undefined || s === null ? '_' : s).join('');
+    const option = document.createElement('option');
+    option.value = JSON.stringify(stack);
+    option.textContent = `${shorthand} (Custom)`;
+    // Insert before the "Custom..." option
+    select.insertBefore(option, select.lastElementChild);
+}
+
+function stackExistsInDropdown(stackKey) {
+    const select = document.getElementById('age-stack-select');
+    return Array.from(select.options).some(opt => opt.value === stackKey);
+}
+
+function updateDropdownSelection(stackKey) {
+    const select = document.getElementById('age-stack-select');
+    select.value = stackKey;
+}
+
+function openStackModal() {
+    const modal = document.getElementById('stack-modal');
+    const inputs = document.querySelectorAll('.stack-inputs input');
+    
+    // Clear inputs
+    inputs.forEach(input => input.value = '');
+    
+    // Pre-fill with current stack if editing
+    currentAgeStack.forEach((val, idx) => {
+        if (idx < 8) inputs[idx].value = val;
+    });
+    
+    updateStackPreview();
+    modal.classList.remove('hidden');
+    inputs[0].focus();
+}
+
+function closeStackModal() {
+    document.getElementById('stack-modal').classList.add('hidden');
+}
+
+function updateStackPreview() {
+    const inputs = document.querySelectorAll('.stack-inputs input');
+    const stack = Array.from(inputs)
+        .map(input => input.value)
+        .filter(val => val !== '');
+    
+    const preview = document.getElementById('stack-preview');
+    if (stack.length === 0) {
+        preview.textContent = '';
+    } else {
+        const names = { '0': 'Erosion', '1': 'Consolidation', '2': 'Bleach' };
+        const description = stack.map(s => names[s] || s).join(' → ');
+        preview.textContent = description;
+    }
+}
 
 async function main() {
     await init();
@@ -1205,14 +1273,13 @@ async function main() {
             case 'f':
             case 'F':
                 e.preventDefault();
-                const ageTypeSelect = document.getElementById('age-type-select');
-                const ageTypes = Array.from(ageTypeSelect.options);
-                const currentAgeIdx = ageTypes.findIndex(o => o.value === ageTypeSelect.value);
-                const nextAgeIdx = (currentAgeIdx + 1) % ageTypes.length;
-                ageTypeSelect.value = ageTypes[nextAgeIdx].value;
-                currentAgeType = parseInt(ageTypes[nextAgeIdx].value, 10);
-                const ageTypeNames = ['Erosion', 'Consolidation', 'Bleach'];
-                console.log('Age type changed to:', ageTypeNames[currentAgeType] || 'Unknown');
+                const ageStackSelect = document.getElementById('age-stack-select');
+                const ageOptions = Array.from(ageStackSelect.options).filter(o => o.value !== 'custom');
+                const currentStackIdx = ageOptions.findIndex(o => o.value === ageStackSelect.value);
+                const nextStackIdx = (currentStackIdx + 1) % ageOptions.length;
+                ageStackSelect.value = ageOptions[nextStackIdx].value;
+                currentAgeStack = JSON.parse(ageOptions[nextStackIdx].value);
+                console.log('Age stack changed to:', currentAgeStack);
                 break;
         }
     });
@@ -1309,11 +1376,70 @@ async function main() {
         setTheme(theme);
     });
 
-    // ── Age Type ────────────────────────────────────────────────────────────
-    document.getElementById('age-type-select').addEventListener('change', e => {
-        currentAgeType = parseInt(e.target.value, 10);
-        const ageTypeNames = ['Erosion', 'Consolidation', 'Bleach'];
-        console.log('Age type changed to:', ageTypeNames[currentAgeType] || 'Unknown');
+    // ── Age Stack ────────────────────────────────────────────────────────────
+    // Load custom stacks from localStorage
+    loadCustomStacks();
+    
+    const ageStackSelect = document.getElementById('age-stack-select');
+    ageStackSelect.addEventListener('change', e => {
+        if (e.target.value === 'custom') {
+            openStackModal();
+            // Reset to current stack
+            e.target.value = JSON.stringify(currentAgeStack);
+        } else {
+            currentAgeStack = JSON.parse(e.target.value);
+            console.log('Age stack changed to:', currentAgeStack);
+        }
+    });
+
+    // ── Custom Stack Modal ───────────────────────────────────────────────────
+    const stackModal = document.getElementById('stack-modal');
+    const stackInputs = document.querySelectorAll('.stack-inputs input');
+    const stackPreview = document.getElementById('stack-preview');
+    
+    // Handle input validation and auto-focus
+    stackInputs.forEach((input, idx) => {
+        input.addEventListener('input', (e) => {
+            const val = e.target.value;
+            if (val && !/^[0-2]$/.test(val)) {
+                e.target.value = '';
+            } else {
+                updateStackPreview();
+                // Auto-focus next input
+                if (val && idx < 7) {
+                    stackInputs[idx + 1].focus();
+                }
+            }
+        });
+        
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && !e.target.value && idx > 0) {
+                stackInputs[idx - 1].focus();
+            }
+        });
+    });
+    
+    document.getElementById('btn-add-stack').addEventListener('click', () => {
+        const stack = Array.from(stackInputs)
+            .map(input => input.value)
+            .filter(val => val !== '')
+            .map(Number);
+        
+        if (stack.length > 0) {
+            addStackToDropdown(stack);
+            customStacks.push(stack);
+            saveCustomStacks();
+            currentAgeStack = stack;
+            updateDropdownSelection(JSON.stringify(stack));
+        }
+        closeStackModal();
+    });
+    
+    document.getElementById('btn-cancel-stack').addEventListener('click', closeStackModal);
+    
+    // Close modal on backdrop click
+    stackModal.addEventListener('click', (e) => {
+        if (e.target === stackModal) closeStackModal();
     });
 
     // ── Color Editor Tool ───────────────────────────────────────────────────
