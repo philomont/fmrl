@@ -1392,6 +1392,28 @@ async function main() {
         }
     });
 
+    // Clear custom stacks button
+    document.getElementById('btn-clear-stacks').addEventListener('click', () => {
+        if (confirm('Clear all custom aging stacks?')) {
+            // Remove custom stack options from dropdown
+            const select = document.getElementById('age-stack-select');
+            const customOptions = Array.from(select.options).filter(opt => 
+                opt.value !== '[0]' && opt.value !== '[1]' && opt.value !== '[2]' && opt.value !== 'custom'
+            );
+            customOptions.forEach(opt => opt.remove());
+            
+            // Clear from localStorage
+            customStacks = [];
+            localStorage.removeItem('fmrl-custom-stacks');
+            
+            // Reset to default stack
+            currentAgeStack = [0];
+            select.value = '[0]';
+            
+            console.log('Custom stacks cleared');
+        }
+    });
+
     // ── Custom Stack Modal ───────────────────────────────────────────────────
     const stackModal = document.getElementById('stack-modal');
     const stackInputs = document.querySelectorAll('.stack-inputs input');
@@ -1399,6 +1421,11 @@ async function main() {
     
     // Handle input validation and auto-focus
     stackInputs.forEach((input, idx) => {
+        // Select all text when focused
+        input.addEventListener('focus', () => {
+            input.select();
+        });
+        
         input.addEventListener('input', (e) => {
             const val = e.target.value;
             if (val && !/^[0-2]$/.test(val)) {
@@ -1416,6 +1443,11 @@ async function main() {
             if (e.key === 'Backspace' && !e.target.value && idx > 0) {
                 stackInputs[idx - 1].focus();
             }
+        });
+        
+        // Select all on click (in case user clicks without tabbing)
+        input.addEventListener('click', () => {
+            input.select();
         });
     });
     

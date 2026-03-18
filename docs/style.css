@@ -309,9 +309,30 @@ html, body {
 }
 /* Dropdown options styling - combined for both selects */
 #theme-select option,
-#age-type-select option {
+#age-stack-select option {
   background: var(--surface);
   color: var(--text);
+}
+
+/* Aging stack selector - matches theme selector */
+#age-stack-select {
+  appearance: none;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0.3rem 0.5rem;
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  cursor: pointer;
+  min-width: 120px;
+}
+#age-stack-select:hover {
+  border-color: var(--text-dim);
+}
+#age-stack-select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 /* Aging technique selector */
