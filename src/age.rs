@@ -144,8 +144,9 @@ fn min_index_in_region(
     }
 }
 
-/// Find the minimum age in a region.
+/// Find the minimum age in a region, ignoring paper pixels (index 0).
 fn min_age_in_region(
+    indices: &[u8],
     ages: &[u8],
     width: usize,
     x: usize,
@@ -159,7 +160,12 @@ fn min_age_in_region(
     let mut min_age = 255u8;
     for by in y..y_end {
         for bx in x..x_end {
-            let age = ages[by * width + bx];
+            let idx = by * width + bx;
+            // Skip paper pixels (index 0) when calculating min age
+            if indices[idx] == PAPER_INDEX {
+                continue;
+            }
+            let age = ages[idx];
             if age < min_age {
                 min_age = age;
             }
@@ -211,9 +217,9 @@ pub fn age_by_consolidation(
             let y_end = (y + 2).min(height);
             let x_end = (x + 2).min(width);
 
-            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
+            let min_age = min_age_in_region(&result, &new_ages, width, x, y, x_end - x, y_end - y);
 
-            // Consolidate if any pixel is age 0 (youngest drives consolidation)
+            // Consolidate if any non-paper pixel is age 0 (youngest drives consolidation)
             if min_age == 0 {
                 should_consolidate_2x2[(y / 2) * (width / 2) + (x / 2)] = true;
             }
@@ -227,7 +233,7 @@ pub fn age_by_consolidation(
             let y_end = (y + 4).min(height);
             let x_end = (x + 4).min(width);
 
-            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
+            let min_age = min_age_in_region(&result, &new_ages, width, x, y, x_end - x, y_end - y);
 
             if min_age == 1 {
                 should_consolidate_4x4[(y / 4) * (width / 4) + (x / 4)] = true;
@@ -241,7 +247,7 @@ pub fn age_by_consolidation(
             let y_end = (y + 8).min(height);
             let x_end = (x + 8).min(width);
 
-            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
+            let min_age = min_age_in_region(&result, &new_ages, width, x, y, x_end - x, y_end - y);
 
             if min_age == 2 {
                 should_consolidate_8x8[(y / 8) * (width / 8) + (x / 8)] = true;
@@ -255,7 +261,7 @@ pub fn age_by_consolidation(
             let y_end = (y + 16).min(height);
             let x_end = (x + 16).min(width);
 
-            let min_age = min_age_in_region(&new_ages, width, x, y, x_end - x, y_end - y);
+            let min_age = min_age_in_region(&result, &new_ages, width, x, y, x_end - x, y_end - y);
 
             if min_age == 3 {
                 should_consolidate_16x16[(y / 16) * (width / 16) + (x / 16)] = true;

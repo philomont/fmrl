@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-03-19
+
+### Added
+
+- **RGB Interface** — New 3-byte RGB format for encoding/decoding
+  - R = index × 16 (0, 16, 32, ... 240 for indices 0-15)
+  - G = contrast (0x00 for paper, 0xFF otherwise)
+  - B = age × 16 (0, 16, 32, ... 240 for ages 0-15)
+  - Replaces RGBA (4 bytes/pixel) for smaller file sizes
+- **Algorithm Stacking** — Apply up to 8 aging algorithms in sequence during encoding
+  - New IHDR format supports variable-length algorithm stack
+  - Algorithms applied sequentially: output of one feeds into next
+  - Web UI supports custom stack creation with 8 input fields
+- **Debug Logging System** — Comprehensive logging for troubleshooting
+  - Toggle in About tray or press 'd' key
+  - Detailed logging option with per-pixel sample data
+  - Batched logging for performance (outputs at end of operation)
+  - JSON format for easy parsing
+- **Debug PNG Export** — Raw RGB visualization
+  - Shows actual decoded RGB values (R=index×16, G=contrast, B=age×16)
+  - Timestamped filenames for test data collection
+
+### Changed
+
+- **Consolidation Algorithm** — Fixed age progression and paper pixel handling
+  - `min_age_in_region()` now ignores paper pixels when calculating minimum age
+  - Paper pixels (index 0) always stored with age 0 in file format
+  - Age progression now works correctly: 0→1→2→3→4 (paper with age 0)
+- **File Size Display** — Fixed blank size calculation
+  - `computeBlankSize()` now uses current pixel ages for accurate baseline
+  - Paper pixels with ages 1-3 no longer inflate blank canvas size
+- **Web App UI** — Updated aging controls
+  - Single "Aging Stack" dropdown replaces individual algorithm selector
+  - Custom stack modal with 8 input fields
+  - Clear custom stacks button (×)
+  - Auto-select text in custom stack inputs for easy editing
+
+### Fixed
+
+- **Consolidation Age Progression** — Fixed bug where aging stopped after one step
+  - Paper pixels were breaking `min_age` calculations
+  - Consolidation now progresses through all age levels correctly
+- **Paper Pixel Ages** — Paper pixels no longer retain non-zero ages in storage
+  - Encoder forces age 0 for paper pixels in `pack_tile_data()`
+  - Reduces file size for blank/aged-to-paper canvases
+- **Debug PNG** — Fixed broken export
+  - Now uses `decode_to_rgb()` instead of removed `decode_to_indices()`
+  - Shows raw RGB values instead of theme palette colors
+
 ## [0.5.0] - 2026-03-12
 
 ### Added

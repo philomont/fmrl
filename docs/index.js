@@ -1,4 +1,4 @@
-import init, { FmrlView, encode_rgb, encode_rgb_with_levels, decode_to_rgb, consolidation_step_with_ages, bleach_step_indices } from './pkg/fmrl.js?v=11';
+import init, { FmrlView, encode_rgb, encode_rgb_with_levels, decode_to_rgb, consolidation_step_with_ages, bleach_step_indices } from './pkg/fmrl.js?v=12';
 
 // Age stack: array of age types (0=erosion, 1=consolidation, 2=bleach)
 let currentAgeStack = [0];
@@ -70,6 +70,101 @@ let customPalette = null; // For user-defined colors
 
 // Debug mode - enables PNG export alongside FMRL for inspection
 let debugMode = false;
+
+// Debug logging - enables detailed logging for troubleshooting
+let debugLoggingEnabled = false;
+let detailedLoggingEnabled = false;
+let debugLogBuffer = [];
+let debugLogStartTime = 0;
+
+// Debug logging functions
+function startDebugLog() {
+    if (!debugLoggingEnabled) return;
+    debugLogBuffer = [];
+    debugLogStartTime = performance.now();
+}
+
+function logDebug(label, summaryData, detailedData = null) {
+    if (!debugLoggingEnabled) return;
+    
+    const entry = {
+        timestamp: performance.now() - debugLogStartTime,
+        label: label,
+        summary: summaryData
+    };
+    
+    if (detailedLoggingEnabled && detailedData) {
+        entry.detailed = detailedData;
+    }
+    
+    debugLogBuffer.push(entry);
+}
+
+function flushDebugLog() {
+    if (!debugLoggingEnabled || debugLogBuffer.length === 0) return;
+    
+    console.log('=== FMRL Debug Log ===');
+    debugLogBuffer.forEach(entry => {
+        console.log(`[${entry.timestamp.toFixed(2)}ms] ${entry.label}:`, JSON.stringify(entry.summary, null, 2));
+        if (entry.detailed) {
+            console.log('  Detailed:', JSON.stringify(entry.detailed, null, 2));
+        }
+    });
+    console.log('=== End Debug Log ===');
+    
+    debugLogBuffer = [];
+}
+
+// Helper functions for debug logging
+function getAgeCounts(pixelAges) {
+    if (!pixelAges) return {};
+    const counts = {};
+    for (let i = 0; i < pixelAges.length; i++) {
+        const age = pixelAges[i];
+        counts[age] = (counts[age] || 0) + 1;
+    }
+    return counts;
+}
+
+function getSamplePixels(pixelAges, count = 10) {
+    if (!pixelAges) return [];
+    const samples = [];
+    let found = 0;
+    for (let i = 0; i < pixelAges.length && found < count; i++) {
+        if (pixelAges[i] > 0) {
+            samples.push({ index: i, age: pixelAges[i] });
+            found++;
+        }
+    }
+    return samples;
+}
+
+function countNonZeroAges(rgb) {
+    if (!rgb) return 0;
+    let count = 0;
+    for (let i = 0; i < rgb.length; i += 3) {
+        if (rgb[i + 2] > 0) count++;
+    }
+    return count;
+}
+
+function getSampleRgb(rgb, count = 10) {
+    if (!rgb) return [];
+    const samples = [];
+    let found = 0;
+    for (let i = 0; i < rgb.length && found < count; i += 3) {
+        if (rgb[i + 2] > 0) {
+            samples.push({ 
+                index: i / 3, 
+                r: rgb[i], 
+                g: rgb[i + 1], 
+                b: rgb[i + 2] 
+            });
+            found++;
+        }
+    }
+    return samples;
+}
 
 // Load themes from JSON file
 async function loadThemes() {
@@ -480,6 +575,9 @@ function _doAgeStep(src, full = true) {
 
 function applyAge(n = 1) {
     try {
+        // Start debug logging
+        startDebugLog();
+        
         // If in text mode, age the base indices (without text/cursor), then re-apply text
         const wasInTextMode = textMode && textCursor;
         const savedTextBuffer = wasInTextMode ? textBuffer : null;
@@ -488,9 +586,21 @@ function applyAge(n = 1) {
             if (textBuffer) _blitText(textBuffer);
         }
 
+        // DEBUG: Log ages before encoding
+        logDebug('Pre-encode ages', 
+            { ageCounts: getAgeCounts(currentPixelAges) },
+            detailedLoggingEnabled ? { samplePixels: getSamplePixels(currentPixelAges, 10) } : null
+        );
+
         // Convert current indices to RGB format for encoding
         // RGB: R=index×16, G=contrast, B=age×16
         const rgb = indicesToRgb(indices);
+
+        // DEBUG: Log RGB buffer
+        logDebug('RGB buffer ages',
+            { nonZeroAges: countNonZeroAges(rgb) },
+            detailedLoggingEnabled ? { sampleRgb: getSampleRgb(rgb, 10) } : null
+        );
 
         // Encode with current age stack and existing age levels
         const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
@@ -509,7 +619,30 @@ function applyAge(n = 1) {
 
         // Decode back to RGB and extract indices
         const decodedRgb = new Uint8Array(decode_to_rgb(bytes));
+        
+        // DEBUG: Log decoded RGB
+        logDebug('Decoded RGB ages',
+            { nonZeroAges: countNonZeroAges(decodedRgb) },
+            detailedLoggingEnabled ? { sampleRgb: getSampleRgb(decodedRgb, 10) } : null
+        );
+        
         extractFromRgb(decodedRgb);
+
+        // DEBUG: Log ages after extraction
+        logDebug('Post-extraction ages',
+            { ageCounts: getAgeCounts(currentPixelAges) },
+            detailedLoggingEnabled ? { samplePixels: getSamplePixels(currentPixelAges, 10) } : null
+        );
+
+        // DEBUG: Log file size
+        logDebug('File size', { 
+            blankSize: blankSize, 
+            actualSize: bytes.length, 
+            difference: bytes.length - blankSize 
+        });
+
+        // Flush all debug logs
+        flushDebugLog();
 
         render();
         updateMetric();
@@ -582,17 +715,10 @@ function formatBytes(bytes) {
 }
 
 function computeBlankSize() {
-    // Use constant PALETTE for consistent blank size across themes
-    // This ensures the base file size is always computed the same way
-    // regardless of which theme is currently selected
-    // RGB format: R=index×16, G=contrast, B=age×16
-    const rgb = new Uint8Array(W * H * 3);
-    for (let i = 0; i < W * H; i++) {
-        rgb[i * 3] = 0;        // R = 0 (paper index)
-        rgb[i * 3 + 1] = 0x00; // G = 0x00 (paper contrast)
-        rgb[i * 3 + 2] = 0;    // B = 0 (age 0)
-    }
-    blankSize = encode_rgb(rgb, W, H, new Uint8Array([0])).length;
+    // Use current pixel ages to get accurate blank size
+    // After aging, even "blank" pixels have ages that affect file size
+    const rgb = indicesToRgb();  // This includes current pixel ages
+    blankSize = encode_rgb(rgb, W, H, new Uint8Array(currentAgeStack)).length;
 }
 
 function updateMetric() {
@@ -919,11 +1045,12 @@ function saveFmrl() {
     } catch (e) { console.error('encode failed:', e); }
 }
 
-/// Save a debug PNG showing what was actually encoded (grayscale, theme-independent)
+/// Save a debug PNG showing raw decoded RGB values
+/// R=index×16, G=contrast, B=age×16 as actual colors
 function saveDebugPng(fmrlBytes, width, height) {
     try {
-        // Decode the FMRL back to see what was actually stored
-        const decodedIndices = decode_to_indices(fmrlBytes);
+        // Decode the FMRL to RGB format (R=index×16, G=contrast, B=age×16)
+        const decodedRgb = new Uint8Array(decode_to_rgb(fmrlBytes));
 
         // Create a canvas to render the decoded image
         const debugCanvas = document.createElement('canvas');
@@ -932,44 +1059,25 @@ function saveDebugPng(fmrlBytes, width, height) {
         const ctx = debugCanvas.getContext('2d');
         const imgData = ctx.createImageData(width, height);
 
-        // v0.4+ grayscale palette for debug display:
-        // Shows the brightness values that each index represents
-        const grayscalePalette = [
-            [255, 255, 255],   // 0: paper - white (but drawn as white for visibility)
-            [8, 8, 8],         // 1: ink - black
-            [17, 17, 17],      // 2: accent
-            [34, 34, 34],      // 3
-            [51, 51, 51],      // 4
-            [68, 68, 68],      // 5
-            [85, 85, 85],      // 6
-            [102, 102, 102],   // 7
-            [119, 119, 119],   // 8
-            [136, 136, 136],   // 9
-            [153, 153, 153],   // 10
-            [170, 170, 170],   // 11
-            [187, 187, 187],   // 12
-            [204, 204, 204],   // 13
-            [221, 221, 221],   // 14
-            [240, 240, 240],   // 15: highlight - light gray
-        ];
-
         for (let i = 0; i < width * height; i++) {
-            const idx = decodedIndices[i];
-            const [r, g, b] = grayscalePalette[idx] || [128, 128, 128];
-            imgData.data[i * 4]     = r;
-            imgData.data[i * 4 + 1] = g;
-            imgData.data[i * 4 + 2] = b;
-            // All pixels opaque in debug PNG
-            imgData.data[i * 4 + 3] = 255;
+            // Raw RGB values as actual colors
+            imgData.data[i * 4] = decodedRgb[i * 3];      // R = R (0-255)
+            imgData.data[i * 4 + 1] = decodedRgb[i * 3 + 1]; // G = G (0 or 255)
+            imgData.data[i * 4 + 2] = decodedRgb[i * 3 + 2]; // B = B (0-255)
+            imgData.data[i * 4 + 3] = 255; // Always opaque
         }
         ctx.putImageData(imgData, 0, 0);
+
+        // Filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `manuscript-debug-${timestamp}.png`;
 
         // Convert to PNG and download
         debugCanvas.toBlob((blob) => {
             const pngUrl = URL.createObjectURL(blob);
             Object.assign(document.createElement('a'), {
                 href: pngUrl,
-                download: 'manuscript-debug.png'
+                download: filename
             }).click();
             URL.revokeObjectURL(pngUrl);
         }, 'image/png');
@@ -1129,6 +1237,7 @@ async function main() {
     canvas.width  = W;
     canvas.height = H;
     indices = new Uint8Array(W * H).fill(0);  // v0.4+: paper = index 0
+    currentPixelAges = new Uint8Array(W * H).fill(0);  // Initialize pixel ages to 0
 
     document.fonts.load(`${textFontSize()}px "National Park"`).catch(() => {});
 
@@ -1268,7 +1377,7 @@ async function main() {
                 setTextMode(false);
                 indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
                 currentAgeLevels = null;
-                currentPixelAges = null;
+                currentPixelAges = new Uint8Array(W * H).fill(0);  // Reset to empty ages
                 break;
             case 'f':
             case 'F':
@@ -1280,6 +1389,18 @@ async function main() {
                 ageStackSelect.value = ageOptions[nextStackIdx].value;
                 currentAgeStack = JSON.parse(ageOptions[nextStackIdx].value);
                 console.log('Age stack changed to:', currentAgeStack);
+                break;
+            case 'd':
+            case 'D':
+                e.preventDefault();
+                // Toggle debug logging
+                debugLoggingEnabled = !debugLoggingEnabled;
+                const debugLogCheckbox = document.getElementById('debug-logging');
+                if (debugLogCheckbox) {
+                    debugLogCheckbox.checked = debugLoggingEnabled;
+                    localStorage.setItem('fmrl-debug-logging', debugLoggingEnabled);
+                }
+                console.log('Debug logging:', debugLoggingEnabled ? 'enabled' : 'disabled');
                 break;
         }
     });
@@ -1344,7 +1465,7 @@ async function main() {
         setTextMode(false);
         indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
         currentAgeLevels = null; // Reset age levels on clear
-        currentPixelAges = null; // Reset pixel ages on clear
+        currentPixelAges = new Uint8Array(W * H).fill(0); // Reset pixel ages to 0
     });
     document.getElementById('btn-save').addEventListener('click', saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
@@ -1366,6 +1487,49 @@ async function main() {
             debugMode = e.target.checked;
             localStorage.setItem('fmrl-debug-mode', debugMode);
             console.log('Debug mode:', debugMode ? 'enabled' : 'disabled');
+        });
+    }
+
+    // ── Debug logging ────────────────────────────────────────────────────────
+    const debugLoggingCheckbox = document.getElementById('debug-logging');
+    const detailedLoggingCheckbox = document.getElementById('detailed-logging');
+    const detailedLoggingLabel = document.getElementById('detailed-logging-label');
+    
+    if (debugLoggingCheckbox) {
+        // Load saved preference
+        debugLoggingEnabled = localStorage.getItem('fmrl-debug-logging') === 'true';
+        debugLoggingCheckbox.checked = debugLoggingEnabled;
+        
+        if (detailedLoggingCheckbox) {
+            detailedLoggingCheckbox.disabled = !debugLoggingEnabled;
+            if (detailedLoggingLabel) {
+                detailedLoggingLabel.style.opacity = debugLoggingEnabled ? '1' : '0.7';
+            }
+        }
+
+        debugLoggingCheckbox.addEventListener('change', e => {
+            debugLoggingEnabled = e.target.checked;
+            localStorage.setItem('fmrl-debug-logging', debugLoggingEnabled);
+            console.log('Debug logging:', debugLoggingEnabled ? 'enabled' : 'disabled');
+            
+            if (detailedLoggingCheckbox) {
+                detailedLoggingCheckbox.disabled = !debugLoggingEnabled;
+                if (detailedLoggingLabel) {
+                    detailedLoggingLabel.style.opacity = debugLoggingEnabled ? '1' : '0.7';
+                }
+            }
+        });
+    }
+    
+    if (detailedLoggingCheckbox) {
+        // Load saved preference
+        detailedLoggingEnabled = localStorage.getItem('fmrl-detailed-logging') === 'true';
+        detailedLoggingCheckbox.checked = detailedLoggingEnabled;
+        
+        detailedLoggingCheckbox.addEventListener('change', e => {
+            detailedLoggingEnabled = e.target.checked;
+            localStorage.setItem('fmrl-detailed-logging', detailedLoggingEnabled);
+            console.log('Detailed logging:', detailedLoggingEnabled ? 'enabled' : 'disabled');
         });
     }
 

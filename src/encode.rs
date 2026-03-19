@@ -201,33 +201,29 @@ fn encode_indexed(
         indices = match age_type {
             AgeType::Erosion => age_by_erosion(&indices, w, h),
             AgeType::Consolidation => {
-                // Use per-pixel ages if available
-                if image.pixel_ages.is_some() {
-                    let (new_indices, new_pixel_ages) =
-                        age_by_consolidation(&indices, &pixel_ages, w, h);
-                    // Compute tile-level ages from per-pixel ages (max age in tile)
-                    for ty in 0..tiles_y {
-                        for tx in 0..tiles_x {
-                            let tile_idx = ty * tiles_x + tx;
-                            let tx0 = tx * TILE_SIZE;
-                            let ty0 = ty * TILE_SIZE;
-                            let mut max_age = 0u8;
-                            for y in 0..TILE_SIZE {
-                                for x in 0..TILE_SIZE {
-                                    let age = new_pixel_ages[(ty0 + y) * w + (tx0 + x)];
-                                    if age > max_age {
-                                        max_age = age;
-                                    }
+                // Always use per-pixel ages (extracted from RGB or from image)
+                let (new_indices, new_pixel_ages) =
+                    age_by_consolidation(&indices, &pixel_ages, w, h);
+                // Compute tile-level ages from per-pixel ages (max age in tile)
+                for ty in 0..tiles_y {
+                    for tx in 0..tiles_x {
+                        let tile_idx = ty * tiles_x + tx;
+                        let tx0 = tx * TILE_SIZE;
+                        let ty0 = ty * TILE_SIZE;
+                        let mut max_age = 0u8;
+                        for y in 0..TILE_SIZE {
+                            for x in 0..TILE_SIZE {
+                                let age = new_pixel_ages[(ty0 + y) * w + (tx0 + x)];
+                                if age > max_age {
+                                    max_age = age;
                                 }
                             }
-                            age_levels[tile_idx] = max_age;
                         }
+                        age_levels[tile_idx] = max_age;
                     }
-                    pixel_ages = new_pixel_ages;
-                    new_indices
-                } else {
-                    consolidation_step_with_age(&indices, w, h, &mut age_levels)
                 }
+                pixel_ages = new_pixel_ages;
+                new_indices
             }
             AgeType::Bleach => {
                 // Convolutional bleach: 2x2 blocks with mixed/diagonal patterns become paper
@@ -287,11 +283,16 @@ fn extract_tile_ages(ages: &[u8], width: usize, tx: usize, ty: usize) -> Vec<u8>
 
 /// Pack tile indices and ages into one byte per pixel.
 /// High nibble (4 bits) = index (0-15), low nibble (4 bits) = age (0-15).
+/// Paper pixels (index 0) always have age 0 to minimize file size.
 fn pack_tile_data(indices: &[u8], ages: &[u8]) -> Vec<u8> {
     assert_eq!(indices.len(), ages.len());
     indices
         .iter()
         .zip(ages.iter())
-        .map(|(&idx, &age)| (idx << 4) | (age & 0x0F))
+        .map(|(&idx, &age)| {
+            // Paper pixels always have age 0
+            let actual_age = if idx == 0 { 0 } else { age };
+            (idx << 4) | (actual_age & 0x0F)
+        })
         .collect()
 }
