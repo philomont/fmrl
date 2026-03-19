@@ -1,12 +1,14 @@
+use fmrl::format::{compute_crc, CHUNK_AGE};
 use fmrl::{decode, encode, render, FmrlImage, Palette};
-use fmrl::format::{AGE_ENTRY_BYTES, CHUNK_AGE, compute_crc};
 
 const NOW_MS: u64 = 1_700_000_000_000;
 const VIEW_MS: u64 = NOW_MS + 5 * 24 * 3600 * 1000; // 5 days later
 
 fn simple_image() -> FmrlImage {
     let palette = Palette::default();
-    let pixels = vec![0u8, 0, 0, 255].repeat(128 * 128);
+    // RGB format: R = index × 16, G = contrast, B = age × 16
+    // Using index 0 (paper), age 0
+    let pixels = vec![0u8, 0x00, 0].repeat(128 * 128);
     let mut image = FmrlImage::new(128, 128, pixels);
     image.palette = palette;
     image
@@ -44,7 +46,10 @@ fn fade_level_incremented_after_render() {
     render(&mut decoded, VIEW_MS, &mut file_bytes).expect("render failed");
 
     for entry in &decoded.age {
-        assert_eq!(entry.fade_level, 1, "fade_level should be 1 after first render");
+        assert_eq!(
+            entry.fade_level, 1,
+            "fade_level should be 1 after first render"
+        );
     }
 }
 
@@ -82,7 +87,10 @@ fn noise_seed_not_modified() {
     render(&mut decoded, VIEW_MS, &mut file_bytes).expect("render failed");
 
     for (entry, &original_seed) in decoded.age.iter().zip(original_seeds.iter()) {
-        assert_eq!(entry.noise_seed, original_seed, "noise_seed must not be modified by render");
+        assert_eq!(
+            entry.noise_seed, original_seed,
+            "noise_seed must not be modified by render"
+        );
     }
 }
 

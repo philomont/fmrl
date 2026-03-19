@@ -1,7 +1,10 @@
-import init, { FmrlView, encode_rgba, encode_rgba_with_age, encode_rgba_with_age_and_levels, decode_to_indices, consolidation_step_with_ages, bleach_step_indices, encode_rgba_with_pixel_ages } from './pkg/fmrl.js?v=10';
+import init, { FmrlView, encode_rgb, encode_rgb_with_levels, decode_to_rgb, consolidation_step_with_ages, bleach_step_indices } from './pkg/fmrl.js?v=12';
 
-// Age type: 0 = erosion (default), 1 = consolidation
-let currentAgeType = 0;
+// Age stack: array of age types (0=erosion, 1=consolidation, 2=bleach)
+let currentAgeStack = [0];
+
+// Custom stacks persisted in localStorage
+let customStacks = [];
 
 // Track age levels (consolidation levels) per tile - persists through encode/decode
 let currentAgeLevels = null;
@@ -67,6 +70,101 @@ let customPalette = null; // For user-defined colors
 
 // Debug mode - enables PNG export alongside FMRL for inspection
 let debugMode = false;
+
+// Debug logging - enables detailed logging for troubleshooting
+let debugLoggingEnabled = false;
+let detailedLoggingEnabled = false;
+let debugLogBuffer = [];
+let debugLogStartTime = 0;
+
+// Debug logging functions
+function startDebugLog() {
+    if (!debugLoggingEnabled) return;
+    debugLogBuffer = [];
+    debugLogStartTime = performance.now();
+}
+
+function logDebug(label, summaryData, detailedData = null) {
+    if (!debugLoggingEnabled) return;
+    
+    const entry = {
+        timestamp: performance.now() - debugLogStartTime,
+        label: label,
+        summary: summaryData
+    };
+    
+    if (detailedLoggingEnabled && detailedData) {
+        entry.detailed = detailedData;
+    }
+    
+    debugLogBuffer.push(entry);
+}
+
+function flushDebugLog() {
+    if (!debugLoggingEnabled || debugLogBuffer.length === 0) return;
+    
+    console.log('=== FMRL Debug Log ===');
+    debugLogBuffer.forEach(entry => {
+        console.log(`[${entry.timestamp.toFixed(2)}ms] ${entry.label}:`, JSON.stringify(entry.summary, null, 2));
+        if (entry.detailed) {
+            console.log('  Detailed:', JSON.stringify(entry.detailed, null, 2));
+        }
+    });
+    console.log('=== End Debug Log ===');
+    
+    debugLogBuffer = [];
+}
+
+// Helper functions for debug logging
+function getAgeCounts(pixelAges) {
+    if (!pixelAges) return {};
+    const counts = {};
+    for (let i = 0; i < pixelAges.length; i++) {
+        const age = pixelAges[i];
+        counts[age] = (counts[age] || 0) + 1;
+    }
+    return counts;
+}
+
+function getSamplePixels(pixelAges, count = 10) {
+    if (!pixelAges) return [];
+    const samples = [];
+    let found = 0;
+    for (let i = 0; i < pixelAges.length && found < count; i++) {
+        if (pixelAges[i] > 0) {
+            samples.push({ index: i, age: pixelAges[i] });
+            found++;
+        }
+    }
+    return samples;
+}
+
+function countNonZeroAges(rgb) {
+    if (!rgb) return 0;
+    let count = 0;
+    for (let i = 0; i < rgb.length; i += 3) {
+        if (rgb[i + 2] > 0) count++;
+    }
+    return count;
+}
+
+function getSampleRgb(rgb, count = 10) {
+    if (!rgb) return [];
+    const samples = [];
+    let found = 0;
+    for (let i = 0; i < rgb.length && found < count; i += 3) {
+        if (rgb[i + 2] > 0) {
+            samples.push({ 
+                index: i / 3, 
+                r: rgb[i], 
+                g: rgb[i + 1], 
+                b: rgb[i + 2] 
+            });
+            found++;
+        }
+    }
+    return samples;
+}
 
 // Load themes from JSON file
 async function loadThemes() {
@@ -477,6 +575,9 @@ function _doAgeStep(src, full = true) {
 
 function applyAge(n = 1) {
     try {
+        // Start debug logging
+        startDebugLog();
+        
         // If in text mode, age the base indices (without text/cursor), then re-apply text
         const wasInTextMode = textMode && textCursor;
         const savedTextBuffer = wasInTextMode ? textBuffer : null;
@@ -485,60 +586,63 @@ function applyAge(n = 1) {
             if (textBuffer) _blitText(textBuffer);
         }
 
-        // For consolidation mode (age type 1), use per-pixel ages directly
-        if (currentAgeType === 1) {
-            // Initialize pixel ages if needed
-            if (!currentPixelAges || currentPixelAges.length !== W * H) {
-                currentPixelAges = new Uint8Array(W * H);
-            }
+        // DEBUG: Log ages before encoding
+        logDebug('Pre-encode ages', 
+            { ageCounts: getAgeCounts(currentPixelAges) },
+            detailedLoggingEnabled ? { samplePixels: getSamplePixels(currentPixelAges, 10) } : null
+        );
 
-            for (let i = 0; i < n; i++) {
-                // Apply one consolidation step with per-pixel ages
-                // Returns concatenated [indices, pixel_ages]
-                const result = consolidation_step_with_ages(indices, currentPixelAges, W, H);
-                const pixelCount = W * H;
+        // Convert current indices to RGB format for encoding
+        // RGB: R=index×16, G=contrast, B=age×16
+        const rgb = indicesToRgb(indices);
 
-                // Extract updated indices and pixel ages
-                indices = new Uint8Array(result.slice(0, pixelCount));
-                currentPixelAges = new Uint8Array(result.slice(pixelCount, pixelCount * 2));
-            }
+        // DEBUG: Log RGB buffer
+        logDebug('RGB buffer ages',
+            { nonZeroAges: countNonZeroAges(rgb) },
+            detailedLoggingEnabled ? { sampleRgb: getSampleRgb(rgb, 10) } : null
+        );
 
-            // Update tile-level age levels from per-pixel ages (max age per tile)
-            updateTileAgeLevelsFromPixelAges();
+        // Encode with current age stack and existing age levels
+        const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
+        const bytes = encode_rgb_with_levels(
+            rgb, 
+            W, 
+            H, 
+            new Uint8Array(currentAgeStack), 
+            ageLevelsArray
+        );
 
-            render();
-            updateMetric();
-            return;
-        }
+        // Read age levels back from the encoded file
+        const view = FmrlView.new(bytes);
+        currentAgeLevels = view.age_levels();
+        view.free();
 
-        // For bleach mode (age type 2), apply 2x2 convolutional bleach
-        if (currentAgeType === 2) {
-            for (let i = 0; i < n; i++) {
-                indices = new Uint8Array(bleach_step_indices(indices, W, H));
-            }
-            render();
-            updateMetric();
-            return;
-        }
+        // Decode back to RGB and extract indices
+        const decodedRgb = new Uint8Array(decode_to_rgb(bytes));
+        
+        // DEBUG: Log decoded RGB
+        logDebug('Decoded RGB ages',
+            { nonZeroAges: countNonZeroAges(decodedRgb) },
+            detailedLoggingEnabled ? { sampleRgb: getSampleRgb(decodedRgb, 10) } : null
+        );
+        
+        extractFromRgb(decodedRgb);
 
-        // For erosion mode (age type 0), use the encode/decode cycle
-        // Age levels persist through the cycle
-        for (let i = 0; i < n; i++) {
-            // Convert current indices to RGBA for encoding
-            const rgba = indicesToGrayscaleRgba(indices);
+        // DEBUG: Log ages after extraction
+        logDebug('Post-extraction ages',
+            { ageCounts: getAgeCounts(currentPixelAges) },
+            detailedLoggingEnabled ? { samplePixels: getSamplePixels(currentPixelAges, 10) } : null
+        );
 
-            // Encode with current age type and existing age levels
-            const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
-            const bytes = encode_rgba_with_age_and_levels(rgba, W, H, currentAgeType, ageLevelsArray);
+        // DEBUG: Log file size
+        logDebug('File size', { 
+            blankSize: blankSize, 
+            actualSize: bytes.length, 
+            difference: bytes.length - blankSize 
+        });
 
-            // Read age levels back from the encoded file
-            const view = FmrlView.new(bytes);
-            currentAgeLevels = view.age_levels();
-            view.free();
-
-            // Decode back to indices (display only)
-            indices = new Uint8Array(decode_to_indices(bytes));
-        }
+        // Flush all debug logs
+        flushDebugLog();
 
         render();
         updateMetric();
@@ -611,22 +715,14 @@ function formatBytes(bytes) {
 }
 
 function computeBlankSize() {
-    // Use constant PALETTE for consistent blank size across themes
-    // This ensures the base file size is always computed the same way
-    // regardless of which theme is currently selected
-    const rgba = new Uint8Array(W * H * 4);
-    for (let i = 0; i < W * H; i++) {
-        const [r, g, b] = PALETTE[0]; // paper color (index 0)
-        rgba[i * 4] = r;
-        rgba[i * 4 + 1] = g;
-        rgba[i * 4 + 2] = b;
-        rgba[i * 4 + 3] = 255;
-    }
-    blankSize = encode_rgba(rgba, W, H).length;
+    // Use current pixel ages to get accurate blank size
+    // After aging, even "blank" pixels have ages that affect file size
+    const rgb = indicesToRgb();  // This includes current pixel ages
+    blankSize = encode_rgb(rgb, W, H, new Uint8Array(currentAgeStack)).length;
 }
 
 function updateMetric() {
-    const size = encode_rgba(indicesToRgba(), W, H).length;
+    const size = encode_rgb(indicesToRgb(), W, H, new Uint8Array(currentAgeStack)).length;
     const el = document.getElementById('size-metric');
 
     // Compute blank size if not already done (first time)
@@ -847,6 +943,32 @@ const STORAGE_PALETTE = [
 /// Convert indices to grayscale RGBA for encoding (theme-independent)
 /// v0.4+ format: Maps indices to brightness values that quantize back to same index.
 /// The codec quantizes: brightness 0-16→1, 17-33→2, ..., 240-255→15, alpha<128→0
+/// Convert indices to RGB format for encoding
+/// RGB: R=index×16, G=contrast (0x00 for paper, 0xFF otherwise), B=age×16
+function indicesToRgb(src = indices) {
+    const rgb = new Uint8Array(W * H * 3);
+    for (let i = 0; i < W * H; i++) {
+        const idx = src[i];
+        const age = currentPixelAges ? currentPixelAges[i] : 0;
+        rgb[i * 3] = idx << 4;                          // R = index × 16
+        rgb[i * 3 + 1] = idx === 0 ? 0x00 : 0xFF;       // G = contrast
+        rgb[i * 3 + 2] = age << 4;                      // B = age × 16
+    }
+    return rgb;
+}
+
+/// Extract indices and ages from RGB format
+/// RGB: R=index×16, G=contrast, B=age×16
+function extractFromRgb(rgb) {
+    for (let i = 0; i < indices.length; i++) {
+        indices[i] = rgb[i * 3] >> 4;
+        if (currentPixelAges) {
+            currentPixelAges[i] = rgb[i * 3 + 2] >> 4;
+        }
+    }
+}
+
+/// DEPRECATED: Use indicesToRgb instead
 /// To get a specific index, we use the MIN brightness value for that index's range.
 function indicesToGrayscaleRgba(src = indices) {
     const rgba = new Uint8Array(W * H * 4);
@@ -897,19 +1019,19 @@ function indicesToGrayscaleRgba(src = indices) {
 
 function saveFmrl() {
     try {
-        // Encode current canvas state using grayscale (theme-independent storage)
-        // Use current age type (0=erosion, 1=fade, 2=noise)
-        let bytes;
-        const rgba = indicesToGrayscaleRgba(indices);
+        // Encode current canvas state using RGB format
+        // RGB: R=index×16, G=contrast, B=age×16
+        const rgb = indicesToRgb(indices);
         const ageLevelsArray = currentAgeLevels || new Uint8Array(0);
 
-        if (currentAgeType === 1 && currentPixelAges && currentPixelAges.length > 0) {
-            // For consolidation mode with per-pixel ages, use the new encoder
-            bytes = encode_rgba_with_pixel_ages(rgba, W, H, currentAgeType, ageLevelsArray, currentPixelAges);
-        } else {
-            // For other modes or when no pixel ages, use standard encoder
-            bytes = encode_rgba_with_age_and_levels(rgba, W, H, currentAgeType, ageLevelsArray);
-        }
+        // Encode with current age stack
+        const bytes = encode_rgb_with_levels(
+            rgb, 
+            W, 
+            H, 
+            new Uint8Array(currentAgeStack), 
+            ageLevelsArray
+        );
 
         // Save FMRL file
         const url   = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
@@ -923,11 +1045,12 @@ function saveFmrl() {
     } catch (e) { console.error('encode failed:', e); }
 }
 
-/// Save a debug PNG showing what was actually encoded (grayscale, theme-independent)
+/// Save a debug PNG showing raw decoded RGB values
+/// R=index×16, G=contrast, B=age×16 as actual colors
 function saveDebugPng(fmrlBytes, width, height) {
     try {
-        // Decode the FMRL back to see what was actually stored
-        const decodedIndices = decode_to_indices(fmrlBytes);
+        // Decode the FMRL to RGB format (R=index×16, G=contrast, B=age×16)
+        const decodedRgb = new Uint8Array(decode_to_rgb(fmrlBytes));
 
         // Create a canvas to render the decoded image
         const debugCanvas = document.createElement('canvas');
@@ -936,44 +1059,25 @@ function saveDebugPng(fmrlBytes, width, height) {
         const ctx = debugCanvas.getContext('2d');
         const imgData = ctx.createImageData(width, height);
 
-        // v0.4+ grayscale palette for debug display:
-        // Shows the brightness values that each index represents
-        const grayscalePalette = [
-            [255, 255, 255],   // 0: paper - white (but drawn as white for visibility)
-            [8, 8, 8],         // 1: ink - black
-            [17, 17, 17],      // 2: accent
-            [34, 34, 34],      // 3
-            [51, 51, 51],      // 4
-            [68, 68, 68],      // 5
-            [85, 85, 85],      // 6
-            [102, 102, 102],   // 7
-            [119, 119, 119],   // 8
-            [136, 136, 136],   // 9
-            [153, 153, 153],   // 10
-            [170, 170, 170],   // 11
-            [187, 187, 187],   // 12
-            [204, 204, 204],   // 13
-            [221, 221, 221],   // 14
-            [240, 240, 240],   // 15: highlight - light gray
-        ];
-
         for (let i = 0; i < width * height; i++) {
-            const idx = decodedIndices[i];
-            const [r, g, b] = grayscalePalette[idx] || [128, 128, 128];
-            imgData.data[i * 4]     = r;
-            imgData.data[i * 4 + 1] = g;
-            imgData.data[i * 4 + 2] = b;
-            // All pixels opaque in debug PNG
-            imgData.data[i * 4 + 3] = 255;
+            // Raw RGB values as actual colors
+            imgData.data[i * 4] = decodedRgb[i * 3];      // R = R (0-255)
+            imgData.data[i * 4 + 1] = decodedRgb[i * 3 + 1]; // G = G (0 or 255)
+            imgData.data[i * 4 + 2] = decodedRgb[i * 3 + 2]; // B = B (0-255)
+            imgData.data[i * 4 + 3] = 255; // Always opaque
         }
         ctx.putImageData(imgData, 0, 0);
+
+        // Filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `manuscript-debug-${timestamp}.png`;
 
         // Convert to PNG and download
         debugCanvas.toBlob((blob) => {
             const pngUrl = URL.createObjectURL(blob);
             Object.assign(document.createElement('a'), {
                 href: pngUrl,
-                download: 'manuscript-debug.png'
+                download: filename
             }).click();
             URL.revokeObjectURL(pngUrl);
         }, 'image/png');
@@ -988,15 +1092,20 @@ function loadFmrl(arrayBuffer) {
         const peek  = FmrlView.new(bytes);
         const fileW = peek.width(), fileH = peek.height();
 
-        // Read age levels and age type from the file
+        // Read age levels and age stack from the file
         currentAgeLevels = peek.age_levels();
-        currentAgeType = peek.age_type();
+        const ageTypesStr = peek.age_types(); // Returns comma-separated string like "0,1,2"
+        const fileStack = ageTypesStr.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
 
-        // Update the UI to match the file's age type
-        const ageSelect = document.getElementById('age-type-select');
-        if (ageSelect) {
-            ageSelect.value = currentAgeType.toString();
+        // Add file's stack to dropdown if not exists
+        const stackKey = JSON.stringify(fileStack);
+        if (!stackExistsInDropdown(stackKey)) {
+            addStackToDropdown(fileStack);
         }
+
+        // Update current stack and UI
+        currentAgeStack = fileStack;
+        updateDropdownSelection(stackKey);
 
         peek.free();
 
@@ -1005,30 +1114,26 @@ function loadFmrl(arrayBuffer) {
         canvas.height = H;
         textHelper = null;
 
-        // Decode without additional aging (file already contains aged data)
-        indices  = new Uint8Array(decode_to_indices(bytes));
-
-        // Initialize per-pixel ages from tile ages
-        // Each pixel in a tile gets the tile's age
-        if (currentAgeType === 1 && currentAgeLevels) {
-            const tilesX = W / TILE_SIZE;
-            const tilesY = H / TILE_SIZE;
-            currentPixelAges = new Uint8Array(W * H);
-            for (let ty = 0; ty < tilesY; ty++) {
-                for (let tx = 0; tx < tilesX; tx++) {
-                    const tileAge = currentAgeLevels[ty * tilesX + tx] || 0;
-                    const y0 = ty * TILE_SIZE;
-                    const x0 = tx * TILE_SIZE;
-                    for (let y = 0; y < TILE_SIZE; y++) {
-                        for (let x = 0; x < TILE_SIZE; x++) {
-                            currentPixelAges[(y0 + y) * W + (x0 + x)] = tileAge;
-                        }
+        // Initialize per-pixel ages
+        const tilesX = W / TILE_SIZE;
+        const tilesY = H / TILE_SIZE;
+        currentPixelAges = new Uint8Array(W * H);
+        for (let ty = 0; ty < tilesY; ty++) {
+            for (let tx = 0; tx < tilesX; tx++) {
+                const tileAge = currentAgeLevels[ty * tilesX + tx] || 0;
+                const y0 = ty * TILE_SIZE;
+                const x0 = tx * TILE_SIZE;
+                for (let y = 0; y < TILE_SIZE; y++) {
+                    for (let x = 0; x < TILE_SIZE; x++) {
+                        currentPixelAges[(y0 + y) * W + (x0 + x)] = tileAge;
                     }
                 }
             }
-        } else {
-            currentPixelAges = null;
         }
+
+        // Decode to RGB and extract indices
+        const rgb = new Uint8Array(decode_to_rgb(bytes));
+        extractFromRgb(rgb);
 
         render();
         lastMetricSize = 0;
@@ -1050,6 +1155,77 @@ function closeTray() {
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
+// ── Custom Stack Modal Functions ───────────────────────────────────────────
+
+function loadCustomStacks() {
+    const saved = localStorage.getItem('fmrl-custom-stacks');
+    if (saved) {
+        customStacks = JSON.parse(saved);
+        customStacks.forEach(stack => addStackToDropdown(stack));
+    }
+}
+
+function saveCustomStacks() {
+    localStorage.setItem('fmrl-custom-stacks', JSON.stringify(customStacks));
+}
+
+function addStackToDropdown(stack) {
+    const select = document.getElementById('age-stack-select');
+    const shorthand = stack.map(s => s === undefined || s === null ? '_' : s).join('');
+    const option = document.createElement('option');
+    option.value = JSON.stringify(stack);
+    option.textContent = `${shorthand} (Custom)`;
+    // Insert before the "Custom..." option
+    select.insertBefore(option, select.lastElementChild);
+}
+
+function stackExistsInDropdown(stackKey) {
+    const select = document.getElementById('age-stack-select');
+    return Array.from(select.options).some(opt => opt.value === stackKey);
+}
+
+function updateDropdownSelection(stackKey) {
+    const select = document.getElementById('age-stack-select');
+    select.value = stackKey;
+}
+
+function openStackModal() {
+    const modal = document.getElementById('stack-modal');
+    const inputs = document.querySelectorAll('.stack-inputs input');
+    
+    // Clear inputs
+    inputs.forEach(input => input.value = '');
+    
+    // Pre-fill with current stack if editing
+    currentAgeStack.forEach((val, idx) => {
+        if (idx < 8) inputs[idx].value = val;
+    });
+    
+    updateStackPreview();
+    modal.classList.remove('hidden');
+    inputs[0].focus();
+}
+
+function closeStackModal() {
+    document.getElementById('stack-modal').classList.add('hidden');
+}
+
+function updateStackPreview() {
+    const inputs = document.querySelectorAll('.stack-inputs input');
+    const stack = Array.from(inputs)
+        .map(input => input.value)
+        .filter(val => val !== '');
+    
+    const preview = document.getElementById('stack-preview');
+    if (stack.length === 0) {
+        preview.textContent = '';
+    } else {
+        const names = { '0': 'Erosion', '1': 'Consolidation', '2': 'Bleach' };
+        const description = stack.map(s => names[s] || s).join(' → ');
+        preview.textContent = description;
+    }
+}
+
 async function main() {
     await init();
 
@@ -1061,6 +1237,7 @@ async function main() {
     canvas.width  = W;
     canvas.height = H;
     indices = new Uint8Array(W * H).fill(0);  // v0.4+: paper = index 0
+    currentPixelAges = new Uint8Array(W * H).fill(0);  // Initialize pixel ages to 0
 
     document.fonts.load(`${textFontSize()}px "National Park"`).catch(() => {});
 
@@ -1200,19 +1377,30 @@ async function main() {
                 setTextMode(false);
                 indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
                 currentAgeLevels = null;
-                currentPixelAges = null;
+                currentPixelAges = new Uint8Array(W * H).fill(0);  // Reset to empty ages
                 break;
             case 'f':
             case 'F':
                 e.preventDefault();
-                const ageTypeSelect = document.getElementById('age-type-select');
-                const ageTypes = Array.from(ageTypeSelect.options);
-                const currentAgeIdx = ageTypes.findIndex(o => o.value === ageTypeSelect.value);
-                const nextAgeIdx = (currentAgeIdx + 1) % ageTypes.length;
-                ageTypeSelect.value = ageTypes[nextAgeIdx].value;
-                currentAgeType = parseInt(ageTypes[nextAgeIdx].value, 10);
-                const ageTypeNames = ['Erosion', 'Consolidation', 'Bleach'];
-                console.log('Age type changed to:', ageTypeNames[currentAgeType] || 'Unknown');
+                const ageStackSelect = document.getElementById('age-stack-select');
+                const ageOptions = Array.from(ageStackSelect.options).filter(o => o.value !== 'custom');
+                const currentStackIdx = ageOptions.findIndex(o => o.value === ageStackSelect.value);
+                const nextStackIdx = (currentStackIdx + 1) % ageOptions.length;
+                ageStackSelect.value = ageOptions[nextStackIdx].value;
+                currentAgeStack = JSON.parse(ageOptions[nextStackIdx].value);
+                console.log('Age stack changed to:', currentAgeStack);
+                break;
+            case 'd':
+            case 'D':
+                e.preventDefault();
+                // Toggle debug logging
+                debugLoggingEnabled = !debugLoggingEnabled;
+                const debugLogCheckbox = document.getElementById('debug-logging');
+                if (debugLogCheckbox) {
+                    debugLogCheckbox.checked = debugLoggingEnabled;
+                    localStorage.setItem('fmrl-debug-logging', debugLoggingEnabled);
+                }
+                console.log('Debug logging:', debugLoggingEnabled ? 'enabled' : 'disabled');
                 break;
         }
     });
@@ -1277,7 +1465,7 @@ async function main() {
         setTextMode(false);
         indices.fill(0); render(); lastMetricSize = 0; blankSize = 0; updateMetric();
         currentAgeLevels = null; // Reset age levels on clear
-        currentPixelAges = null; // Reset pixel ages on clear
+        currentPixelAges = new Uint8Array(W * H).fill(0); // Reset pixel ages to 0
     });
     document.getElementById('btn-save').addEventListener('click', saveFmrl);
     document.getElementById('file-input').addEventListener('change', e => {
@@ -1302,6 +1490,49 @@ async function main() {
         });
     }
 
+    // ── Debug logging ────────────────────────────────────────────────────────
+    const debugLoggingCheckbox = document.getElementById('debug-logging');
+    const detailedLoggingCheckbox = document.getElementById('detailed-logging');
+    const detailedLoggingLabel = document.getElementById('detailed-logging-label');
+    
+    if (debugLoggingCheckbox) {
+        // Load saved preference
+        debugLoggingEnabled = localStorage.getItem('fmrl-debug-logging') === 'true';
+        debugLoggingCheckbox.checked = debugLoggingEnabled;
+        
+        if (detailedLoggingCheckbox) {
+            detailedLoggingCheckbox.disabled = !debugLoggingEnabled;
+            if (detailedLoggingLabel) {
+                detailedLoggingLabel.style.opacity = debugLoggingEnabled ? '1' : '0.7';
+            }
+        }
+
+        debugLoggingCheckbox.addEventListener('change', e => {
+            debugLoggingEnabled = e.target.checked;
+            localStorage.setItem('fmrl-debug-logging', debugLoggingEnabled);
+            console.log('Debug logging:', debugLoggingEnabled ? 'enabled' : 'disabled');
+            
+            if (detailedLoggingCheckbox) {
+                detailedLoggingCheckbox.disabled = !debugLoggingEnabled;
+                if (detailedLoggingLabel) {
+                    detailedLoggingLabel.style.opacity = debugLoggingEnabled ? '1' : '0.7';
+                }
+            }
+        });
+    }
+    
+    if (detailedLoggingCheckbox) {
+        // Load saved preference
+        detailedLoggingEnabled = localStorage.getItem('fmrl-detailed-logging') === 'true';
+        detailedLoggingCheckbox.checked = detailedLoggingEnabled;
+        
+        detailedLoggingCheckbox.addEventListener('change', e => {
+            detailedLoggingEnabled = e.target.checked;
+            localStorage.setItem('fmrl-detailed-logging', detailedLoggingEnabled);
+            console.log('Detailed logging:', detailedLoggingEnabled ? 'enabled' : 'disabled');
+        });
+    }
+
     // ── Theme ───────────────────────────────────────────────────────────────
     initTheme();
     document.getElementById('theme-select').addEventListener('change', e => {
@@ -1309,11 +1540,102 @@ async function main() {
         setTheme(theme);
     });
 
-    // ── Age Type ────────────────────────────────────────────────────────────
-    document.getElementById('age-type-select').addEventListener('change', e => {
-        currentAgeType = parseInt(e.target.value, 10);
-        const ageTypeNames = ['Erosion', 'Consolidation', 'Bleach'];
-        console.log('Age type changed to:', ageTypeNames[currentAgeType] || 'Unknown');
+    // ── Age Stack ────────────────────────────────────────────────────────────
+    // Load custom stacks from localStorage
+    loadCustomStacks();
+    
+    const ageStackSelect = document.getElementById('age-stack-select');
+    ageStackSelect.addEventListener('change', e => {
+        if (e.target.value === 'custom') {
+            openStackModal();
+            // Reset to current stack
+            e.target.value = JSON.stringify(currentAgeStack);
+        } else {
+            currentAgeStack = JSON.parse(e.target.value);
+            console.log('Age stack changed to:', currentAgeStack);
+        }
+    });
+
+    // Clear custom stacks button
+    document.getElementById('btn-clear-stacks').addEventListener('click', () => {
+        if (confirm('Clear all custom aging stacks?')) {
+            // Remove custom stack options from dropdown
+            const select = document.getElementById('age-stack-select');
+            const customOptions = Array.from(select.options).filter(opt => 
+                opt.value !== '[0]' && opt.value !== '[1]' && opt.value !== '[2]' && opt.value !== 'custom'
+            );
+            customOptions.forEach(opt => opt.remove());
+            
+            // Clear from localStorage
+            customStacks = [];
+            localStorage.removeItem('fmrl-custom-stacks');
+            
+            // Reset to default stack
+            currentAgeStack = [0];
+            select.value = '[0]';
+            
+            console.log('Custom stacks cleared');
+        }
+    });
+
+    // ── Custom Stack Modal ───────────────────────────────────────────────────
+    const stackModal = document.getElementById('stack-modal');
+    const stackInputs = document.querySelectorAll('.stack-inputs input');
+    const stackPreview = document.getElementById('stack-preview');
+    
+    // Handle input validation and auto-focus
+    stackInputs.forEach((input, idx) => {
+        // Select all text when focused
+        input.addEventListener('focus', () => {
+            input.select();
+        });
+        
+        input.addEventListener('input', (e) => {
+            const val = e.target.value;
+            if (val && !/^[0-2]$/.test(val)) {
+                e.target.value = '';
+            } else {
+                updateStackPreview();
+                // Auto-focus next input
+                if (val && idx < 7) {
+                    stackInputs[idx + 1].focus();
+                }
+            }
+        });
+        
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && !e.target.value && idx > 0) {
+                stackInputs[idx - 1].focus();
+            }
+        });
+        
+        // Select all on click (in case user clicks without tabbing)
+        input.addEventListener('click', () => {
+            input.select();
+        });
+    });
+    
+    document.getElementById('btn-add-stack').addEventListener('click', () => {
+        const stack = Array.from(stackInputs)
+            .map(input => input.value)
+            .filter(val => val !== '')
+            .map(Number);
+        
+        if (stack.length > 0) {
+            addStackToDropdown(stack);
+            customStacks.push(stack);
+            saveCustomStacks();
+            currentAgeStack = stack;
+            updateDropdownSelection(JSON.stringify(stack));
+        }
+        closeStackModal();
+    });
+    
+    document.getElementById('btn-cancel-stack').addEventListener('click', closeStackModal);
+    
+    // Close modal on backdrop click
+    stackModal.addEventListener('click', (e) => {
+        if (e.target === stackModal) closeStackModal();
     });
 
     // ── Color Editor Tool ───────────────────────────────────────────────────

@@ -11,17 +11,13 @@ export class FmrlView {
      */
     age_levels(): Uint8Array;
     /**
-     * Returns the age type: 0 = erosion, 1 = consolidation, 2 = bleach
+     * Returns the age types as a comma-separated string (e.g., "0,1,2")
      */
-    age_type(): number;
+    age_types(): string;
     /**
      * Average fade_level across all tiles (0–255).
      */
     avg_fade_level(): number;
-    /**
-     * Returns the color mode: 3 = indexed, 6 = RGBA
-     */
-    color_mode(): number;
     /**
      * Decode and apply decay. Returns RGBA pixels. Also mutates file_bytes.
      */
@@ -32,18 +28,13 @@ export class FmrlView {
     get_mutated_bytes(): Uint8Array;
     height(): number;
     /**
-     * Returns true if this file uses RGBA mode
-     */
-    is_rgba(): boolean;
-    /**
      * last_view timestamp (ms since Unix epoch) from tile 0. Returns f64 for JS compatibility.
      */
     last_view_ms(): number;
     static new(data: Uint8Array): FmrlView;
     /**
      * Returns per-pixel ages extracted from packed tile data.
-     * For indexed mode: unpacks low nibble from packed format.
-     * For RGBA mode: returns zeros (no per-pixel ages stored).
+     * Unpacks low nibble from packed format.
      */
     pixel_ages(): Uint8Array;
     /**
@@ -88,61 +79,26 @@ export function consolidation_step_with_ages(indices: Uint8Array, pixel_ages: Ui
 export function create_demo_fmrl(): Uint8Array;
 
 /**
- * Decode a .fmrl file and return flat palette indices (0–3), row-major, width×height bytes.
- * Does not apply decay and does not mutate the file — intended for loading into an editor.
- *
- * Note: For RGBA mode files, this converts RGBA back to indices via quantization.
- * Use `decode_to_rgba` to get raw RGBA data for RGBA mode files.
+ * Decode a .fmrl file and return RGB visualization pixels.
+ * Format: R = index × 16, G = contrast (0x00 for paper, 0xFF otherwise), B = age × 16
+ * Returns 3 bytes per pixel (RGB, no alpha)
  */
-export function decode_to_indices(data: Uint8Array): Uint8Array;
+export function decode_to_rgb(data: Uint8Array): Uint8Array;
 
 /**
- * Decode a .fmrl file and return raw RGBA pixels.
- * For indexed mode, this expands palette colors to RGBA.
- * For RGBA mode, this returns the original RGBA data.
+ * Encode raw RGB pixels into a new .fmrl file.
+ * `rgb` must be `width * height * 3` bytes; dimensions must be multiples of 128.
+ * Format: R = index × 16, G = contrast (0x00 for paper, 0xFF otherwise), B = age × 16
+ * `age_types`: array of age type values (0=erosion, 1=consolidation, 2=bleach)
  */
-export function decode_to_rgba(data: Uint8Array): Uint8Array;
+export function encode_rgb(rgb: Uint8Array, width: number, height: number, age_types: Uint8Array): Uint8Array;
 
 /**
- * Encode raw RGBA pixels into a new .fmrl file using indexed mode (palette quantization).
- * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
- * Uses default age_type (erosion).
- */
-export function encode_rgba(rgba: Uint8Array, width: number, height: number): Uint8Array;
-
-/**
- * Encode raw RGBA pixels into a new .fmrl file using full RGBA mode (no palette quantization).
- * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
- * Uses default age_type (erosion).
- */
-export function encode_rgba_full(rgba: Uint8Array, width: number, height: number): Uint8Array;
-
-/**
- * Encode raw RGBA pixels in full RGBA mode with specified age type.
- * `age_type`: 0 = erosion, 1 = fade, 2 = noise
- */
-export function encode_rgba_full_with_age(rgba: Uint8Array, width: number, height: number, age_type: number): Uint8Array;
-
-/**
- * Encode raw RGBA pixels with specified age type.
- * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
- */
-export function encode_rgba_with_age(rgba: Uint8Array, width: number, height: number, age_type: number): Uint8Array;
-
-/**
- * Encode raw RGBA pixels with age type and existing age levels.
- * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+ * Encode raw RGB pixels with existing age levels.
+ * `age_types`: array of age type values (0=erosion, 1=consolidation, 2=bleach)
  * `age_levels`: per-tile consolidation levels (empty = start fresh)
  */
-export function encode_rgba_with_age_and_levels(rgba: Uint8Array, width: number, height: number, age_type: number, age_levels: Uint8Array): Uint8Array;
-
-/**
- * Encode raw RGBA pixels with age type, age levels, and per-pixel ages.
- * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
- * `age_levels`: per-tile consolidation levels (empty = start fresh)
- * `pixel_ages`: per-pixel ages (empty = use tile-level ages, must be width*height bytes)
- */
-export function encode_rgba_with_pixel_ages(rgba: Uint8Array, width: number, height: number, age_type: number, age_levels: Uint8Array, pixel_ages: Uint8Array): Uint8Array;
+export function encode_rgb_with_levels(rgb: Uint8Array, width: number, height: number, age_types: Uint8Array, age_levels: Uint8Array): Uint8Array;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -153,22 +109,15 @@ export interface InitOutput {
     readonly consolidation_step_indices: (a: number, b: number, c: number, d: number) => [number, number];
     readonly consolidation_step_with_ages: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly create_demo_fmrl: () => [number, number, number, number];
-    readonly decode_to_indices: (a: number, b: number) => [number, number, number, number];
-    readonly decode_to_rgba: (a: number, b: number) => [number, number, number, number];
-    readonly encode_rgba: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly encode_rgba_full: (a: number, b: number, c: number, d: number) => [number, number, number, number];
-    readonly encode_rgba_full_with_age: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
-    readonly encode_rgba_with_age: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
-    readonly encode_rgba_with_age_and_levels: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
-    readonly encode_rgba_with_pixel_ages: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number, number, number];
+    readonly decode_to_rgb: (a: number, b: number) => [number, number, number, number];
+    readonly encode_rgb: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly encode_rgb_with_levels: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number, number, number];
     readonly fmrlview_age_levels: (a: number) => [number, number];
-    readonly fmrlview_age_type: (a: number) => number;
+    readonly fmrlview_age_types: (a: number) => [number, number];
     readonly fmrlview_avg_fade_level: (a: number) => number;
-    readonly fmrlview_color_mode: (a: number) => number;
     readonly fmrlview_decode_and_decay: (a: number) => [number, number, number, number];
     readonly fmrlview_get_mutated_bytes: (a: number) => [number, number];
     readonly fmrlview_height: (a: number) => number;
-    readonly fmrlview_is_rgba: (a: number) => number;
     readonly fmrlview_last_view_ms: (a: number) => number;
     readonly fmrlview_new: (a: number, b: number) => [number, number, number];
     readonly fmrlview_pixel_ages: (a: number) => [number, number];

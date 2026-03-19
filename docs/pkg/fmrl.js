@@ -30,12 +30,20 @@ export class FmrlView {
         return v1;
     }
     /**
-     * Returns the age type: 0 = erosion, 1 = consolidation, 2 = bleach
-     * @returns {number}
+     * Returns the age types as a comma-separated string (e.g., "0,1,2")
+     * @returns {string}
      */
-    age_type() {
-        const ret = wasm.fmrlview_age_type(this.__wbg_ptr);
-        return ret;
+    age_types() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.fmrlview_age_types(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
     }
     /**
      * Average fade_level across all tiles (0–255).
@@ -43,14 +51,6 @@ export class FmrlView {
      */
     avg_fade_level() {
         const ret = wasm.fmrlview_avg_fade_level(this.__wbg_ptr);
-        return ret;
-    }
-    /**
-     * Returns the color mode: 3 = indexed, 6 = RGBA
-     * @returns {number}
-     */
-    color_mode() {
-        const ret = wasm.fmrlview_color_mode(this.__wbg_ptr);
         return ret;
     }
     /**
@@ -84,14 +84,6 @@ export class FmrlView {
         return ret;
     }
     /**
-     * Returns true if this file uses RGBA mode
-     * @returns {boolean}
-     */
-    is_rgba() {
-        const ret = wasm.fmrlview_is_rgba(this.__wbg_ptr);
-        return ret !== 0;
-    }
-    /**
      * last_view timestamp (ms since Unix epoch) from tile 0. Returns f64 for JS compatibility.
      * @returns {number}
      */
@@ -114,8 +106,7 @@ export class FmrlView {
     }
     /**
      * Returns per-pixel ages extracted from packed tile data.
-     * For indexed mode: unpacks low nibble from packed format.
-     * For RGBA mode: returns zeros (no per-pixel ages stored).
+     * Unpacks low nibble from packed format.
      * @returns {Uint8Array}
      */
     pixel_ages() {
@@ -222,18 +213,16 @@ export function create_demo_fmrl() {
 }
 
 /**
- * Decode a .fmrl file and return flat palette indices (0–3), row-major, width×height bytes.
- * Does not apply decay and does not mutate the file — intended for loading into an editor.
- *
- * Note: For RGBA mode files, this converts RGBA back to indices via quantization.
- * Use `decode_to_rgba` to get raw RGBA data for RGBA mode files.
+ * Decode a .fmrl file and return RGB visualization pixels.
+ * Format: R = index × 16, G = contrast (0x00 for paper, 0xFF otherwise), B = age × 16
+ * Returns 3 bytes per pixel (RGB, no alpha)
  * @param {Uint8Array} data
  * @returns {Uint8Array}
  */
-export function decode_to_indices(data) {
+export function decode_to_rgb(data) {
     const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.decode_to_indices(ptr0, len0);
+    const ret = wasm.decode_to_rgb(ptr0, len0);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
@@ -243,125 +232,22 @@ export function decode_to_indices(data) {
 }
 
 /**
- * Decode a .fmrl file and return raw RGBA pixels.
- * For indexed mode, this expands palette colors to RGBA.
- * For RGBA mode, this returns the original RGBA data.
- * @param {Uint8Array} data
- * @returns {Uint8Array}
- */
-export function decode_to_rgba(data) {
-    const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.decode_to_rgba(ptr0, len0);
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
-    }
-    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v2;
-}
-
-/**
- * Encode raw RGBA pixels into a new .fmrl file using indexed mode (palette quantization).
- * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
- * Uses default age_type (erosion).
- * @param {Uint8Array} rgba
+ * Encode raw RGB pixels into a new .fmrl file.
+ * `rgb` must be `width * height * 3` bytes; dimensions must be multiples of 128.
+ * Format: R = index × 16, G = contrast (0x00 for paper, 0xFF otherwise), B = age × 16
+ * `age_types`: array of age type values (0=erosion, 1=consolidation, 2=bleach)
+ * @param {Uint8Array} rgb
  * @param {number} width
  * @param {number} height
+ * @param {Uint8Array} age_types
  * @returns {Uint8Array}
  */
-export function encode_rgba(rgba, width, height) {
-    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+export function encode_rgb(rgb, width, height, age_types) {
+    const ptr0 = passArray8ToWasm0(rgb, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.encode_rgba(ptr0, len0, width, height);
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
-    }
-    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v2;
-}
-
-/**
- * Encode raw RGBA pixels into a new .fmrl file using full RGBA mode (no palette quantization).
- * `rgba` must be `width * height * 4` bytes; dimensions must be multiples of 32.
- * Uses default age_type (erosion).
- * @param {Uint8Array} rgba
- * @param {number} width
- * @param {number} height
- * @returns {Uint8Array}
- */
-export function encode_rgba_full(rgba, width, height) {
-    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.encode_rgba_full(ptr0, len0, width, height);
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
-    }
-    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v2;
-}
-
-/**
- * Encode raw RGBA pixels in full RGBA mode with specified age type.
- * `age_type`: 0 = erosion, 1 = fade, 2 = noise
- * @param {Uint8Array} rgba
- * @param {number} width
- * @param {number} height
- * @param {number} age_type
- * @returns {Uint8Array}
- */
-export function encode_rgba_full_with_age(rgba, width, height, age_type) {
-    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.encode_rgba_full_with_age(ptr0, len0, width, height, age_type);
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
-    }
-    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v2;
-}
-
-/**
- * Encode raw RGBA pixels with specified age type.
- * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
- * @param {Uint8Array} rgba
- * @param {number} width
- * @param {number} height
- * @param {number} age_type
- * @returns {Uint8Array}
- */
-export function encode_rgba_with_age(rgba, width, height, age_type) {
-    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.encode_rgba_with_age(ptr0, len0, width, height, age_type);
-    if (ret[3]) {
-        throw takeFromExternrefTable0(ret[2]);
-    }
-    var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-    return v2;
-}
-
-/**
- * Encode raw RGBA pixels with age type and existing age levels.
- * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
- * `age_levels`: per-tile consolidation levels (empty = start fresh)
- * @param {Uint8Array} rgba
- * @param {number} width
- * @param {number} height
- * @param {number} age_type
- * @param {Uint8Array} age_levels
- * @returns {Uint8Array}
- */
-export function encode_rgba_with_age_and_levels(rgba, width, height, age_type, age_levels) {
-    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(age_levels, wasm.__wbindgen_malloc);
+    const ptr1 = passArray8ToWasm0(age_types, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.encode_rgba_with_age_and_levels(ptr0, len0, width, height, age_type, ptr1, len1);
+    const ret = wasm.encode_rgb(ptr0, len0, width, height, ptr1, len1);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }
@@ -371,26 +257,24 @@ export function encode_rgba_with_age_and_levels(rgba, width, height, age_type, a
 }
 
 /**
- * Encode raw RGBA pixels with age type, age levels, and per-pixel ages.
- * `age_type`: 0 = erosion, 1 = consolidation, 2 = noise
+ * Encode raw RGB pixels with existing age levels.
+ * `age_types`: array of age type values (0=erosion, 1=consolidation, 2=bleach)
  * `age_levels`: per-tile consolidation levels (empty = start fresh)
- * `pixel_ages`: per-pixel ages (empty = use tile-level ages, must be width*height bytes)
- * @param {Uint8Array} rgba
+ * @param {Uint8Array} rgb
  * @param {number} width
  * @param {number} height
- * @param {number} age_type
+ * @param {Uint8Array} age_types
  * @param {Uint8Array} age_levels
- * @param {Uint8Array} pixel_ages
  * @returns {Uint8Array}
  */
-export function encode_rgba_with_pixel_ages(rgba, width, height, age_type, age_levels, pixel_ages) {
-    const ptr0 = passArray8ToWasm0(rgba, wasm.__wbindgen_malloc);
+export function encode_rgb_with_levels(rgb, width, height, age_types, age_levels) {
+    const ptr0 = passArray8ToWasm0(rgb, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray8ToWasm0(age_levels, wasm.__wbindgen_malloc);
+    const ptr1 = passArray8ToWasm0(age_types, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(pixel_ages, wasm.__wbindgen_malloc);
+    const ptr2 = passArray8ToWasm0(age_levels, wasm.__wbindgen_malloc);
     const len2 = WASM_VECTOR_LEN;
-    const ret = wasm.encode_rgba_with_pixel_ages(ptr0, len0, width, height, age_type, ptr1, len1, ptr2, len2);
+    const ret = wasm.encode_rgb_with_levels(ptr0, len0, width, height, ptr1, len1, ptr2, len2);
     if (ret[3]) {
         throw takeFromExternrefTable0(ret[2]);
     }

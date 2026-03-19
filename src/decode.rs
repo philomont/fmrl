@@ -5,8 +5,8 @@ use flate2::read::ZlibDecoder;
 
 use crate::error::FmrlError;
 use crate::format::{
-    AgeEntry, AGE_ENTRY_BYTES, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR, CHUNK_META,
-    ColorMode, IhdrChunk, MAGIC, Palette, TILE_SIZE, parse_chunk,
+    parse_chunk, AgeEntry, IhdrChunk, Palette, CHUNK_AGE, CHUNK_DATA, CHUNK_IEND, CHUNK_IHDR,
+    CHUNK_META, MAGIC, TILE_SIZE,
 };
 
 #[derive(Debug)]
@@ -33,14 +33,9 @@ pub struct TileData {
 }
 
 impl TileData {
-    /// Check if this tile is in indexed mode
+    /// Check if this tile is in indexed mode (packed index+age format)
     pub fn is_indexed(&self) -> bool {
         self.data.len() == TILE_SIZE * TILE_SIZE
-    }
-
-    /// Check if this tile is in RGBA mode
-    pub fn is_rgba(&self) -> bool {
-        self.data.len() == TILE_SIZE * TILE_SIZE * 4
     }
 
     /// Get data as palette indices (panics if not indexed)
@@ -56,10 +51,28 @@ impl TileData {
         self.data.iter().map(|&packed| packed & 0x0F).collect()
     }
 
-    /// Get data as RGBA pixels (panics if not RGBA)
-    pub fn rgba(&self) -> &[u8] {
-        assert_eq!(self.data.len(), TILE_SIZE * TILE_SIZE * 4, "not RGBA mode");
-        &self.data
+    /// Convert packed index+age data to RGB format for visualization:
+    /// - R = index × 16 (0, 16, 32, ... 240 for indices 0-15)
+    /// - G = 0x00 if index=0 (paper), 0xFF otherwise (contrast)
+    /// - B = age × 16 (0, 16, 32, ... 240 for ages 0-15)
+    /// Returns 3 bytes per pixel (RGB, no alpha)
+    pub fn to_rgb(&self) -> Vec<u8> {
+        assert_eq!(self.data.len(), TILE_SIZE * TILE_SIZE, "not indexed mode");
+        let mut rgb = Vec::with_capacity(TILE_SIZE * TILE_SIZE * 3);
+
+        for &packed in &self.data {
+            let index = packed >> 4;
+            let age = packed & 0x0F;
+
+            // R = index × 16
+            rgb.push(index << 4);
+            // G = 0x00 if paper (index=0), 0xFF otherwise
+            rgb.push(if index == 0 { 0x00 } else { 0xFF });
+            // B = age × 16
+            rgb.push(age << 4);
+        }
+
+        rgb
     }
 }
 
@@ -115,7 +128,11 @@ pub fn decode(data: &[u8]) -> Result<DecodedFmrl, FmrlError> {
 
             let mut name = [0u8; 4];
             name.copy_from_slice(&data[name_start..name_start + 4]);
-            raw_chunks.push(RawChunk { name, data_start, data_end });
+            raw_chunks.push(RawChunk {
+                name,
+                data_start,
+                data_end,
+            });
             scan_offset = next;
         }
     }
@@ -150,7 +167,9 @@ pub fn decode(data: &[u8]) -> Result<DecodedFmrl, FmrlError> {
         if chunk.name == CHUNK_IHDR {
             ihdr = Some(IhdrChunk::from_bytes(chunk.data)?);
         } else if chunk.name == CHUNK_DATA {
-            let ihdr_ref = ihdr.as_ref().ok_or(FmrlError::MalformedChunk("DATA before IHDR"))?;
+            let ihdr_ref = ihdr
+                .as_ref()
+                .ok_or(FmrlError::MalformedChunk("DATA before IHDR"))?;
             let (parsed_palette, parsed_tiles) = parse_data_chunk(chunk.data, ihdr_ref)?;
             palette = parsed_palette;
             tiles = parsed_tiles;
@@ -185,7 +204,8 @@ pub fn decode(data: &[u8]) -> Result<DecodedFmrl, FmrlError> {
     for ty in 0..tiles_y {
         for tx in 0..tiles_x {
             // Find entry for this tile, or use default
-            let entry = age_entries.iter()
+            let entry = age_entries
+                .iter()
                 .find(|e| e.tx as usize == tx && e.ty as usize == ty)
                 .cloned()
                 .unwrap_or_else(|| AgeEntry {
@@ -195,7 +215,6 @@ pub fn decode(data: &[u8]) -> Result<DecodedFmrl, FmrlError> {
                     fade_level: 0,
                     noise_seed: [tx as u8, (tx >> 8) as u8, ty as u8, (ty >> 8) as u8],
                     edge_damage: 0,
-                    reserved: 0,
                 });
             full_age.push(entry);
         }
@@ -212,18 +231,21 @@ pub fn decode(data: &[u8]) -> Result<DecodedFmrl, FmrlError> {
 }
 
 fn parse_data_chunk(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<TileData>), FmrlError> {
-    match ihdr.color_mode {
-        ColorMode::Indexed => parse_data_chunk_indexed(data, ihdr),
-        ColorMode::Rgba => parse_data_chunk_rgba(data, ihdr),
-    }
+    // Only indexed mode is supported
+    parse_data_chunk_indexed(data, ihdr)
 }
 
-fn parse_data_chunk_indexed(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<TileData>), FmrlError> {
+fn parse_data_chunk_indexed(
+    data: &[u8],
+    ihdr: &IhdrChunk,
+) -> Result<(Palette, Vec<TileData>), FmrlError> {
     use crate::format::PALETTE_SIZE;
 
     let palette_bytes = PALETTE_SIZE * 3;
     if data.len() < palette_bytes {
-        return Err(FmrlError::MalformedChunk("DATA chunk too short for palette"));
+        return Err(FmrlError::MalformedChunk(
+            "DATA chunk too short for palette",
+        ));
     }
     // Palette: PALETTE_SIZE × RGB
     let mut palette_colors = [[0u8; 3]; PALETTE_SIZE];
@@ -273,61 +295,10 @@ fn parse_data_chunk_indexed(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, V
     Ok((palette, tiles))
 }
 
-fn parse_data_chunk_rgba(data: &[u8], ihdr: &IhdrChunk) -> Result<(Palette, Vec<TileData>), FmrlError> {
-    if data.len() < 3 {
-        return Err(FmrlError::MalformedChunk("DATA chunk too short for paper color"));
-    }
-    // Paper color: 3 bytes RGB (used as fade target)
-    let paper_color = [data[0], data[1], data[2]];
-    // Create a palette with paper as index 0, others default
-    let mut palette = Palette::default();
-    palette.0[0] = paper_color;
-
-    let w = ihdr.width as usize;
-    let h = ihdr.height as usize;
-    let tiles_x = w / TILE_SIZE;
-    let tiles_y = h / TILE_SIZE;
-    let rgba_count = TILE_SIZE * TILE_SIZE * 4;
-
-    let mut tiles = Vec::with_capacity(tiles_x * tiles_y);
-    let mut pos = 3usize;
-
-    for ty in 0..tiles_y {
-        for tx in 0..tiles_x {
-            if pos + 3 > data.len() {
-                return Err(FmrlError::UnexpectedEof);
-            }
-            let comp_len = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;
-            let flags = data[pos + 2];
-            pos += 3;
-
-            if pos + comp_len > data.len() {
-                return Err(FmrlError::UnexpectedEof);
-            }
-            let compressed = &data[pos..pos + comp_len];
-            pos += comp_len;
-
-            let rgba = zlib_decompress(compressed)?;
-            if rgba.len() != rgba_count {
-                return Err(FmrlError::MalformedChunk("RGBA tile size mismatch"));
-            }
-
-            tiles.push(TileData {
-                tx: tx as u16,
-                ty: ty as u16,
-                flags,
-                data: rgba,
-            });
-        }
-    }
-
-    Ok((palette, tiles))
-}
-
 fn parse_age_chunk(data: &[u8]) -> Result<Vec<AgeEntry>, FmrlError> {
     // New format: compressed AGE data
     // First 2 bytes: entry count (u16 LE)
-    // Rest: zlib compressed age entries (20 bytes each)
+    // Rest: zlib compressed age entries (18 bytes each)
     if data.len() < 2 {
         return Err(FmrlError::MalformedChunk("AGE chunk too short"));
     }
@@ -338,8 +309,8 @@ fn parse_age_chunk(data: &[u8]) -> Result<Vec<AgeEntry>, FmrlError> {
     let compressed = &data[2..];
     let decompressed = zlib_decompress(compressed)?;
 
-    // Each entry is 20 bytes: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) + edge_damage(1) + reserved(2)
-    const NEW_ENTRY_BYTES: usize = 20;
+    // Each entry is 18 bytes: tx(2) + ty(2) + last_view(8) + fade_level(1) + noise_seed(4) + edge_damage(1)
+    const NEW_ENTRY_BYTES: usize = 18;
     if decompressed.len() != count * NEW_ENTRY_BYTES {
         return Err(FmrlError::MalformedChunk("AGE decompressed size mismatch"));
     }
@@ -350,13 +321,23 @@ fn parse_age_chunk(data: &[u8]) -> Result<Vec<AgeEntry>, FmrlError> {
         let tx = u16::from_le_bytes([decompressed[offset], decompressed[offset + 1]]);
         let ty = u16::from_le_bytes([decompressed[offset + 2], decompressed[offset + 3]]);
         let last_view = u64::from_le_bytes([
-            decompressed[offset + 4], decompressed[offset + 5], decompressed[offset + 6], decompressed[offset + 7],
-            decompressed[offset + 8], decompressed[offset + 9], decompressed[offset + 10], decompressed[offset + 11],
+            decompressed[offset + 4],
+            decompressed[offset + 5],
+            decompressed[offset + 6],
+            decompressed[offset + 7],
+            decompressed[offset + 8],
+            decompressed[offset + 9],
+            decompressed[offset + 10],
+            decompressed[offset + 11],
         ]);
         let fade_level = decompressed[offset + 12];
-        let noise_seed = [decompressed[offset + 13], decompressed[offset + 14], decompressed[offset + 15], decompressed[offset + 16]];
+        let noise_seed = [
+            decompressed[offset + 13],
+            decompressed[offset + 14],
+            decompressed[offset + 15],
+            decompressed[offset + 16],
+        ];
         let edge_damage = decompressed[offset + 17];
-        let reserved = u16::from_le_bytes([decompressed[offset + 18], decompressed[offset + 19]]);
 
         entries.push(AgeEntry {
             tx,
@@ -365,7 +346,6 @@ fn parse_age_chunk(data: &[u8]) -> Result<Vec<AgeEntry>, FmrlError> {
             fade_level,
             noise_seed,
             edge_damage,
-            reserved,
         });
     }
 
@@ -377,8 +357,8 @@ fn parse_age_chunk(data: &[u8]) -> Result<Vec<AgeEntry>, FmrlError> {
 pub fn patch_age_chunk(file_bytes: &mut [u8], age_chunk_range: &Range<usize>, age: &[AgeEntry]) {
     use crate::encode::zlib_compress;
 
-    // Serialize entries in new format (20 bytes each)
-    const NEW_ENTRY_BYTES: usize = 20;
+    // Serialize entries in new format (18 bytes each)
+    const NEW_ENTRY_BYTES: usize = 18;
     let mut age_data = Vec::with_capacity(age.len() * NEW_ENTRY_BYTES);
     for entry in age {
         age_data.extend_from_slice(&entry.tx.to_le_bytes());
@@ -387,7 +367,6 @@ pub fn patch_age_chunk(file_bytes: &mut [u8], age_chunk_range: &Range<usize>, ag
         age_data.push(entry.fade_level);
         age_data.extend_from_slice(&entry.noise_seed);
         age_data.push(entry.edge_damage);
-        age_data.extend_from_slice(&entry.reserved.to_le_bytes());
     }
 
     // Compress age data
@@ -405,12 +384,16 @@ pub fn patch_age_chunk(file_bytes: &mut [u8], age_chunk_range: &Range<usize>, ag
     let range_len = age_chunk_range.end - age_chunk_range.start;
     if payload_len > range_len {
         // Truncate or handle error - for now just use what fits
-        eprintln!("Warning: new AGE payload {} bytes > old {} bytes", payload_len, range_len);
+        eprintln!(
+            "Warning: new AGE payload {} bytes > old {} bytes",
+            payload_len, range_len
+        );
     }
 
     // Write payload into range
     let write_len = payload_len.min(range_len);
-    file_bytes[age_chunk_range.start..age_chunk_range.start + write_len].copy_from_slice(&payload[..write_len]);
+    file_bytes[age_chunk_range.start..age_chunk_range.start + write_len]
+        .copy_from_slice(&payload[..write_len]);
 
     // Recompute CRC: covers CHUNK_AGE name ++ payload
     let new_crc = crate::format::compute_crc(CHUNK_AGE, &payload[..write_len]);
